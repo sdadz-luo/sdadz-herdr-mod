@@ -13,9 +13,11 @@ import { OPEN_LOCATION, openLocation } from "./preferences.js";
 import { findOpenFile, focusOpenFile } from "./open-files.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
-// Listing a folder starts a process on Windows, so keep results briefly and
-// read two levels at a time: expanding into a prefetched folder needs no wait.
-const CACHE_MS = 10000, TREE_DEPTH = 2, TREE_SPREAD = 8;
+// Listing a folder starts a process on Windows, so read two levels at a time:
+// the folder itself, plus its first subfolders as a one-shot prefetch. The
+// prefetch is consumed by the next expand and never serves a later refresh, so
+// an expanded folder is always read fresh.
+const PREFETCH_MS = 10000, TREE_DEPTH = 2, TREE_SPREAD = 8;
 // node starts in ~70ms where powershell needs ~350ms, and prints UTF-8, so it
 // lists the folder and its first subfolders in one call. Falls back to directory().
 const TREE_SCRIPT = [
@@ -74,7 +76,7 @@ export async function directory(path, on) {
 }
 
 // Windows only: a folder and its first subfolders in one node call, as
-// { relativePath: [[name, isDirectory], ...] }, so later expands hit the cache.
+// { relativePath: [[name, isDirectory], ...] }, so the next expand needs no wait.
 export async function directoryTree(path) {
   const r = await exec("node", ["-e", TREE_SCRIPT, path, String(PER_FOLDER + 1), String(TREE_DEPTH), String(TREE_SPREAD)]);
   if (r.code !== 0) throw new Error(r.stderr || "无法列出此文件夹");
@@ -91,7 +93,7 @@ export class FilesPanel extends View {
   }
   initPanel(cx) {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
-    this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map(); this.dirCache = new Map(); this.trees = new Map();
+    this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map(); this.prefetched = new Map();
     this.look = appearance();
     this.lookKey = JSON.stringify(this.look);
     this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
@@ -146,67 +148,56 @@ export class FilesPanel extends View {
     });
   }
   current(context, loc = this.location()) { return this.context === context && (this.role === "preview" ? context !== null : loc.key === context); }
-  // A recent listing, unless the folder is on another machine: remote folders
-  // are polled, so their cache would hide changes between polls.
-  cached(path) {
-    if (this.on) return null;
-    const hit = this.dirCache.get(path);
-    return hit && Date.now() - hit.at < CACHE_MS ? hit.list : null;
+  // A prefetched listing is used once, by the expand that follows it.
+  takePrefetched(path) {
+    const hit = this.prefetched.get(path);
+    if (!hit) return null;
+    this.prefetched.delete(path);
+    return Date.now() - hit.at < PREFETCH_MS ? hit.list : null;
   }
   dropFolder(path) {
     this.entryCount -= this.entries.get(path)?.length || 0;
     const removed = this.entries.delete(path), limited = this.limits.delete(path);
     this.pending.delete(path); this.limited = this.limits.size > 0;
-    this.dirCache.delete(path);
+    this.prefetched.delete(path);
     return removed || limited;
   }
-  // Fill the cache with this folder and its first subfolders in one process.
-  // Requests for the same folder share one read.
-  async localTree(path) {
-    if (this.on || appWindow().platform !== "windows") return false;
-    let task = this.trees.get(path);
-    if (!task) {
-      const context = this.context;
-      task = directoryTree(path).then(tree => {
-        // The folder or its machine changed while node was reading: its paths
-        // belong to the old view and must not fill the new cache.
-        if (this.context !== context) return false;
-        const at = Date.now();
-        for (const [rel, rows] of Object.entries(tree)) {
-          if (!Array.isArray(rows)) continue;
-          const dir = rel ? joinPath(path, rel) : path;
-          this.dirCache.set(dir, { at, list: rows.map(([name, isDir]) => ({ name, dir: isDir })) });
-        }
-        if (this.dirCache.size > 300) {
-          const now = Date.now();
-          for (const [key, value] of this.dirCache) if (now - value.at > CACHE_MS) this.dirCache.delete(key);
-        }
-        return true;
-      }).catch(() => false).finally(() => { if (this.trees.get(path) === task) this.trees.delete(path); });
-      this.trees.set(path, task);
+  // Read this folder and its first subfolders in one node call. The folder's
+  // own listing is returned; the subfolders wait in `prefetched` for their expand.
+  async readTree(path) {
+    if (this.on || appWindow().platform !== "windows") return null;
+    const tree = await directoryTree(path), root = tree[""];
+    if (!Array.isArray(root)) return null;
+    const at = Date.now();
+    for (const [rel, rows] of Object.entries(tree)) {
+      if (!rel || !Array.isArray(rows)) continue;
+      this.prefetched.set(joinPath(path, rel), { at, list: rows.map(([name, isDir]) => ({ name, dir: isDir })) });
     }
-    return await task;
+    if (this.prefetched.size > 300) {
+      const now = Date.now();
+      for (const [key, value] of this.prefetched) if (now - value.at > PREFETCH_MS) this.prefetched.delete(key);
+    }
+    return root.map(([name, isDir]) => ({ name, dir: isDir }));
   }
   // Read the next level now, so expanding into it needs no wait.
   prefetch(path, cx) {
     if (this.on || appWindow().platform !== "windows") return;
     const dirs = this.entries.get(path)?.filter(entry => entry.dir) ?? [];
-    if (!dirs.length || this.cached(joinPath(path, dirs[0].name))) return;
-    cx.spawn(async () => { await this.localTree(path); });
+    if (!dirs.length || dirs.some(entry => this.prefetched.has(joinPath(path, entry.name)))) return;
+    const context = this.context;
+    cx.spawn(async () => { if (this.context === context) await this.readTree(path).catch(() => null); });
   }
   async loadFolder(path, context) {
     if (!this.current(context) || !this.folders.has(path)) return false;
     const entries = this.entries, pending = this.pending, request = {};
     pending.set(path, request);
     try {
-      let hit = this.cached(path);
-      if (!hit) {
-        await this.localTree(path);
+      let list = this.takePrefetched(path);
+      if (!list) {
+        list = await this.readTree(path).catch(() => null);
         if (!this.current(context) || !this.folders.has(path)) return false;
-        hit = this.cached(path);
       }
-      const list = hit ?? await directory(path, this.on);
-      if (!hit) this.dirCache.set(path, { at: Date.now(), list });
+      if (!list) list = await directory(path, this.on);
       if (entries !== this.entries || pending.get(path) !== request || !this.current(context) || !this.folders.has(path)) return false;
       const used = this.entryCount - (this.entries.get(path)?.length || 0);
       const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
@@ -227,7 +218,7 @@ export class FilesPanel extends View {
     if (context !== this.context) {
       this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
       this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
-      this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.dirCache.clear(); this.trees.clear(); this.show(null); this.error = null; this.loading = null;
+      this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.prefetched.clear(); this.show(null); this.error = null; this.loading = null;
       this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
       this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
       this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
@@ -250,12 +241,8 @@ export class FilesPanel extends View {
         if (!this.current(context) || generation !== this.generation) return;
         if (!same(roots, this.rootInfo)) this.treeVersion++;
         this.rootInfo = roots;
-        // Drop entries for folders removed on disk so their budget can be reused.
-        // A refresh without explicit paths keeps what a recent read already covers.
-        const forced = options.paths ? new Set(options.paths) : null;
-        if (forced) for (const path of forced) this.dirCache.delete(path);
-        const queue = forced ? [...forced] : [...this.folders].filter(path => !this.entries.has(path) || !this.cached(path));
-        const listing = queue.length > 0;
+        // Paid for by each expand; a prefetched folder is taken by loadFolder.
+        const queue = [...(options.paths || this.folders)], listing = queue.length > 0;
         let readError = null;
         await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
           while (queue.length && generation === this.generation) {
