@@ -1,0 +1,478 @@
+--- a/actions.js
++++ b/actions.js
+@@ -38,7 +38,7 @@
+   return { space, path, kind, root, physicalRoot, on: on ?? null, active };
+ }
+ export function ensureTarget(target) {
+-  if (!spaces().some(s => s.id === target.space && s.machine === target.on)) throw new Error("The target space is no longer available");
++  if (!spaces().some(s => s.id === target.space && s.machine === target.on)) throw new Error("目标工作空间已不可用");
+ }
+ export function reference(target) {
+   let cwd = target.active?.cwd;
+@@ -53,14 +53,14 @@
+ export async function insertReference(target, cx) {
+   ensureTarget(target);
+   const active = target.active;
+-  if (!active?.terminal) throw new Error("There is no active terminal in this space");
++  if (!active?.terminal) throw new Error("此工作空间没有活动终端");
+   const space = spaces().find(s => s.id === target.space), tabs = new Set(space.tabs.map(t => t.id));
+-  if (active.pane && !panes().some(p => p.pane === active.pane && tabs.has(p.tab) && p.terminal)) throw new Error("The target terminal is no longer available");
++  if (active.pane && !panes().some(p => p.pane === active.pane && tabs.has(p.tab) && p.terminal)) throw new Error("目标终端已不可用");
+   const previous = cx.read_from_clipboard();
+   // run() queues a command. Yield before reading focus or restoring clipboard text.
+   run("pane.focus", { terminal: active.terminal });
+   await cx.sleep(0);
+-  if (focused()?.terminal !== active.terminal && focused()?.shown !== active.terminal) throw new Error("Could not focus the target terminal");
++  if (focused()?.terminal !== active.terminal && focused()?.shown !== active.terminal) throw new Error("无法聚焦目标终端");
+   try {
+     cx.write_to_clipboard(reference(target));
+     run("terminal.paste");
+@@ -68,7 +68,7 @@
+   } finally { if (previous !== undefined) cx.write_to_clipboard(previous); }
+ }
+ export function validateName(name) {
+-  if (!name.trim() || name === "." || name === ".." || /[/\\\x00-\x1f\x7f]/.test(name)) throw new Error("Enter a name without path separators or control characters");
++  if (!name.trim() || name === "." || name === ".." || /[/\\\x00-\x1f\x7f]/.test(name)) throw new Error("名称不能包含路径分隔符或控制字符");
+   return name;
+ }
+ export async function exists(path, on) {
+@@ -77,7 +77,7 @@
+     return result.stdout.trim() === "yes";
+   }
+   const result = await exec("sh", ["-c", '[ -e "$1" ] || [ -L "$1" ]', "files-plus", path], { on });
+-  if (result.code !== 0 && result.code !== 1) throw new Error(result.stderr || "Cannot check this path");
++  if (result.code !== 0 && result.code !== 1) throw new Error(result.stderr || "无法检查此路径");
+   return result.code === 0;
+ }
+ export async function availablePath(dir, name, kind, on) {
+@@ -88,27 +88,27 @@
+     const path = joinPath(dir, candidate);
+     if (!await exists(path, on)) return path;
+   }
+-  throw new Error("No available copy name in this folder");
++  throw new Error("此文件夹中没有可用的副本名称");
+ }
+ export function changed() { setShared(REVISION, (Number(shared(REVISION)) || 0) + 1); }
+ 
+ export async function paste(target) {
+   ensureTarget(target);
+   const source = shared(CLIPBOARD), dir = destination(target);
+-  if (!source || source.on !== target.on) throw new Error("Copy an entry from the same machine first");
++  if (!source || source.on !== target.on) throw new Error("请先在同一台机器上复制条目");
+   if (source.kind !== "file") {
+-    if (contains(source.path, dir)) throw new Error("A folder cannot be pasted into itself or a descendant");
++    if (contains(source.path, dir)) throw new Error("文件夹不能粘贴到自身或其子目录");
+     // A symlink in the destination path must not bypass the directory-cycle check.
+     if (!windows(target.on)) {
+       const physical = await shell('cd -P "$1" && printf "%s\\0" "$PWD" && cd -P "$2" && printf "%s\\0" "$PWD"', [source.path, dir], target.on);
+       const [src, dst] = physical.stdout.split("\0");
+-      if (contains(src, dst)) throw new Error("A folder cannot be pasted into itself or a descendant");
++      if (contains(src, dst)) throw new Error("文件夹不能粘贴到自身或其子目录");
+     }
+   }
+-  if (!await exists(source.path, target.on)) throw new Error("The copied entry is no longer available");
++  if (!await exists(source.path, target.on)) throw new Error("复制的条目已不可用");
+   const path = await availablePath(dir, basename(source.path), source.kind, target.on);
+   if (windows(target.on)) {
+-    await powershell('param($src,$dst) if (Test-Path -LiteralPath $dst) { throw "The destination already exists" }; Copy-Item -LiteralPath $src -Destination $dst -Recurse -ErrorAction Stop', [source.path, path]);
++    await powershell('param($src,$dst) if (Test-Path -LiteralPath $dst) { throw "目标已存在" }; Copy-Item -LiteralPath $src -Destination $dst -Recurse -ErrorAction Stop', [source.path, path]);
+   } else await checked("cp", ["-R", "-P", "-n", source.path, path], target.on);
+   changed();
+   return path;
+@@ -119,7 +119,7 @@
+   const path = joinPath(destination(target), name);
+   if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
+   if (windows(target.on)) {
+-    await powershell('param($p,$kind) if (Test-Path -LiteralPath $p) { throw "An entry with this name already exists" }; New-Item -Path $p -ItemType $kind -ErrorAction Stop | Out-Null', [path, kind === "file" ? "File" : "Directory"]);
++    await powershell('param($p,$kind) if (Test-Path -LiteralPath $p) { throw "已存在同名条目" }; New-Item -Path $p -ItemType $kind -ErrorAction Stop | Out-Null', [path, kind === "file" ? "File" : "Directory"]);
+   } else if (kind === "file") await shell('set -C; : > "$1"', [path], target.on);
+   else await checked("mkdir", [path], target.on);
+   changed();
+@@ -128,7 +128,7 @@
+ 
+ export async function renameEntry(target, name) {
+   ensureTarget(target); validateName(name);
+-  if (target.kind === "root") throw new Error("Workspace roots cannot be renamed here");
++  if (target.kind === "root") throw new Error("工作区根目录不能在此重命名");
+   if (name === basename(target.path)) return target.path;
+   const path = joinPath(dirname(target.path), name);
+   if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
+@@ -140,7 +140,7 @@
+ 
+ export async function trashEntry(target) {
+   ensureTarget(target);
+-  if (target.kind === "root" || target.path === target.root || /^[a-z]?:?\/$/i.test(target.path)) throw new Error("Workspace roots cannot be removed here");
++  if (target.kind === "root" || target.path === target.root || /^[a-z]?:?\/$/i.test(target.path)) throw new Error("工作区根目录不能在此移除");
+   if (!target.on && window().platform === "macos") {
+     const trash = joinPath(home(), ".Trash");
+     await checked("mkdir", ["-p", trash], null);
+@@ -152,7 +152,7 @@
+ }
+ export async function reveal(target) {
+   ensureTarget(target);
+-  if (target.on !== null) throw new Error("Reveal is only available for local files");
++  if (target.on !== null) throw new Error("仅本地文件可显示所在位置");
+   const platform = window().platform;
+   if (platform === "macos") await checked("open", ["-R", target.path], null);
+   else if (platform === "windows") await checked("explorer.exe", [`/select,${target.path.replace(/\//g, "\\")}`], null);
+@@ -162,19 +162,19 @@
+ export function menuItems(target) {
+   const clip = shared(CLIPBOARD), root = target.kind === "root" || target.path === target.root;
+   return [
+-    { id: "agent", label: "Add to agent (@)", enabled: Boolean(target.active?.terminal) },
+-    { id: "copy", label: "Copy", enabled: true },
+-    { id: "paste", label: "Paste", enabled: Boolean(clip && clip.on === target.on) },
+-    { id: "path", label: "Copy path", enabled: true },
+-    { id: "relative", label: "Copy relative path", enabled: true },
+-    { id: "reveal", label: window().platform === "macos" ? "Reveal in Finder" : window().platform === "windows" ? "Reveal in File Explorer" : "Reveal in file manager", enabled: target.on === null },
+-    { id: "new-file", label: "New file…", enabled: true, group: true },
+-    { id: "new-folder", label: "New folder…", enabled: true },
+-    { id: "rename", label: "Rename…", enabled: !root },
+-    { id: "trash", label: "Move to Trash…", enabled: !root, danger: true },
++    { id: "agent", label: "插入到 agent（@）", enabled: Boolean(target.active?.terminal) },
++    { id: "copy", label: "复制", enabled: true },
++    { id: "paste", label: "粘贴", enabled: Boolean(clip && clip.on === target.on) },
++    { id: "path", label: "复制路径", enabled: true },
++    { id: "relative", label: "复制相对路径", enabled: true },
++    { id: "reveal", label: window().platform === "macos" ? "在访达中显示" : window().platform === "windows" ? "在资源管理器中显示" : "在文件管理器中显示", enabled: target.on === null },
++    { id: "new-file", label: "新建文件…", enabled: true, group: true },
++    { id: "new-folder", label: "新建文件夹…", enabled: true },
++    { id: "rename", label: "重命名…", enabled: !root },
++    { id: "trash", label: "删除…", enabled: !root, danger: true },
+     ...(root ? [
+-      { id: "new-here", label: "New terminal here", enabled: true, group: true },
+-      { id: "remove-root", label: "Remove from workspace", enabled: (workspaceOf(target.space)?.folders.length || 0) > 1 }
++      { id: "new-here", label: "在此打开终端", enabled: true, group: true },
++      { id: "remove-root", label: "从工作区移除", enabled: (workspaceOf(target.space)?.folders.length || 0) > 1 }
+     ] : [])
+   ];
+ }
+--- a/config.js
++++ b/config.js
+@@ -4,7 +4,7 @@
+ const identity = entry => JSON.stringify(entry && { name: entry.name, file: entry.file, folders: entry.folders });
+ function checkSpace(target) {
+   const space = spaces().find(s => s.id === target.space);
+-  if (!space || space.machine !== null || window().platform === "windows") throw new Error("This workspace is no longer available");
++  if (!space || space.machine !== null || window().platform === "windows") throw new Error("此工作区已不可用");
+   return space;
+ }
+ 
+@@ -12,7 +12,7 @@
+   checkSpace(target);
+   let entry = workspaceOf(target.space);
+   const snapshot = entry?.file ? await loadConfig(entry.file) : null;
+-  if (identity(workspaceOf(target.space)) !== identity(entry)) throw new Error("The workspace changed. Open the action again.");
++  if (identity(workspaceOf(target.space)) !== identity(entry)) throw new Error("工作区已变化，请重新打开操作。");
+   if (snapshot) {
+     entry = { name: snapshot.name, file: entry.file, folders: snapshot.folders };
+     setWorkspace(target.space, entry);
+@@ -22,7 +22,7 @@
+ 
+ export async function changeRoots(target, action, path, captured) {
+   const space = checkSpace(target), entry = workspaceOf(target.space);
+-  if (identity(entry) !== identity(captured.entry)) throw new Error("The workspace changed. Open the action again.");
++  if (identity(entry) !== identity(captured.entry)) throw new Error("工作区已变化，请重新打开操作。");
+   const current = entry || { name: space.name, file: null, folders: [{ name: null, path: target.root, source: target.root }] };
+   let folders;
+   if (action === "add-root") {
+@@ -31,9 +31,9 @@
+     if (current.folders.some(f => f.path === path)) return false;
+     folders = [...current.folders, { name: null, path, source: path }];
+   } else {
+-    if (!entry || entry.folders.length < 2) throw new Error("Keep at least one folder in the workspace");
++    if (!entry || entry.folders.length < 2) throw new Error("工作区至少保留一个文件夹");
+     folders = entry.folders.filter(f => f.path !== target.root);
+-    if (folders.length === entry.folders.length) throw new Error("This folder is no longer in the workspace");
++    if (folders.length === entry.folders.length) throw new Error("此文件夹已不在工作区中");
+   }
+   if (!current.file) { setWorkspace(target.space, { ...current, folders }); return true; }
+   const { snapshot } = captured, raw = { ...snapshot.raw }, originals = new Map();
+@@ -47,7 +47,7 @@
+   catch (error) {
+     if (await readTextFile(current.file) !== snapshot.text) {
+       await reloadWorkspace(target.space).catch(() => null);
+-      throw new Error("The workspace file changed on disk. Reloaded. Open the action again.");
++      throw new Error("工作区文件已在磁盘上变化，已重新加载，请重新打开操作。");
+     }
+     throw error;
+   }
+--- a/drag.js
++++ b/drag.js
+@@ -28,7 +28,7 @@
+ export function renderDrag(view, cx) {
+   const p = props(), { colors: t, font } = appearance(), scale = zoom(), screen = viewport() || { width: 1000, height: 800 };
+   const outside = !inBounds(view.cursor, p.panelBounds), canDrop = outside && Boolean(view.targetEntry.active?.terminal);
+-  const name = view.error || basename(view.targetEntry.path), hint = canDrop ? "Click to add @" : "@";
++  const name = view.error || basename(view.targetEntry.path), hint = canDrop ? "点击插入 @" : "@";
+   const height = 32;
+   const width = Math.min(screen.width / scale - 16, Math.max(100, textWidth(name, 13, metrics()) + textWidth(hint, 12, metrics()) + 46));
+   const x = Math.max(8, Math.min(view.cursor.x / scale + 12, screen.width / scale - width - 8));
+--- a/main.js
++++ b/main.js
+@@ -143,16 +143,16 @@
+         if (event.key === "escape") { if (!this.busy) closeOverlay(props().overlay); cx.stop_propagation(); }
+         else if (event.key === "enter" && !this.input) { this.submit(cx); cx.stop_propagation(); }
+       })
+-      .child(div().text_size(15).font_semibold().child(TITLES[action] || "File action"))
++      .child(div().text_size(15).font_semibold().child(TITLES[action] || "文件操作"))
+       .child(div().text_size(12).text_color(t.muted).truncate().child(target.path))
+-      .when(Boolean(this.input), el => el.child(Input.new(this.input).h(36).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_color(t.foreground).accessibility_label("Name")))
+-      .when(action === "trash", el => el.child(div().child(target.on === null && appWindow().platform === "macos" ? `Move “${basename(target.path)}” to Trash?` : `Permanently delete “${basename(target.path)}”? This cannot be undone.`)))
+-      .when(action === "remove-root", el => el.child(div().child("Remove this folder from the workspace? Files on disk are kept.")))
+-      .when(Boolean(this.error) || this.preparing, el => el.child(div().text_size(12).text_color(this.error ? t.ansi1 : t.muted).child(this.error || "Loading workspace…")))
++      .when(Boolean(this.input), el => el.child(Input.new(this.input).h(36).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_color(t.foreground).accessibility_label("名称")))
++      .when(action === "trash", el => el.child(div().child(target.on === null && appWindow().platform === "macos" ? `将“${basename(target.path)}”移到回收站？` : `确定永久删除“${basename(target.path)}”？此操作不可撤销。`)))
++      .when(action === "remove-root", el => el.child(div().child("确定从工作区移除此文件夹？磁盘上的文件会保留。")))
++      .when(Boolean(this.error) || this.preparing, el => el.child(div().text_size(12).text_color(this.error ? t.ansi1 : t.muted).child(this.error || "正在加载工作区…")))
+       .child(div().flex_1())
+       .child(h_flex().justify_end().gap(8)
+-        .child(button("dialog-cancel", "Cancel", false, !this.busy, () => closeOverlay(props().overlay)))
+-        .child(button("dialog-submit", this.busy ? "Working…" : action === "add-root" ? "Choose folder…" : action === "trash" ? target.on === null && appWindow().platform === "macos" ? "Move to Trash" : "Delete" : action === "remove-root" ? "Remove" : action === "rename" ? "Rename" : "Create", true, enabled, cx => this.submit(cx))));
++        .child(button("dialog-cancel", "取消", false, !this.busy, () => closeOverlay(props().overlay)))
++        .child(button("dialog-submit", this.busy ? "处理中…" : action === "add-root" ? "选择文件夹…" : action === "trash" ? target.on === null && appWindow().platform === "macos" ? "移到回收站" : "删除" : action === "remove-root" ? "移除" : action === "rename" ? "重命名" : "创建", true, enabled, cx => this.submit(cx))));
+   }
+   renderSettings() {
+     const { colors: t, font } = appearance(), selected = openLocation(shared(OPEN_LOCATION));
+@@ -165,15 +165,15 @@
+         } else return;
+         cx.stop_propagation(); cx.notify();
+       })
+-      .child(div().text_size(15).font_semibold().child("Files settings"))
+-      .child(div().text_color(t.muted).child("Open files in"))
+-      .child(v_flex().gap(4).role("radio_group").accessibility_label("Open files in").children(OPEN_OPTIONS.map(option =>
++      .child(div().text_size(15).font_semibold().child("文件面板设置"))
++      .child(div().text_color(t.muted).child("文件打开位置"))
++      .child(v_flex().gap(4).role("radio_group").accessibility_label("文件打开位置").children(OPEN_OPTIONS.map(option =>
+         h_flex().id(`open-${option.value}`).h(32).px(10).gap(10).items_center().rounded(6).cursor_default().role("radio_button").checked(selected === option.value).accessibility_label(option.label)
+           .bg(selected === option.value ? t.selected : t.popover).hover(s => s.bg(t.hover))
+           .on_click((_event, cx) => { setShared(OPEN_LOCATION, option.value); cx.stop_propagation(); cx.notify(); })
+           .child(div().w(14).child(selected === option.value ? "●" : "○")).child(option.label))))
+-      .child(h_flex().justify_end().child(div().id("settings-done").px(12).h(28).flex().items_center().rounded(6).role("button").accessibility_label("Done").cursor_default().hover(s => s.bg(t.hover))
+-        .on_click(() => closeOverlay(props().overlay)).child("Done")));
++      .child(h_flex().justify_end().child(div().id("settings-done").px(12).h(28).flex().items_center().rounded(6).role("button").accessibility_label("完成").cursor_default().hover(s => s.bg(t.hover))
++        .on_click(() => closeOverlay(props().overlay)).child("完成")));
+   }
+   render(cx) {
+     if (this.role === "preview") return this.renderPreview(cx);
+--- a/metrics.js
++++ b/metrics.js
+@@ -2,7 +2,7 @@
+ import { v_flex, h_flex } from "gpui-base";
+ import { settings } from "herdr";
+ 
+-export const TITLES = { "new-file": "New file", "new-folder": "New folder", rename: "Rename", trash: "Move to Trash", "add-root": "Add folder to workspace", "remove-root": "Remove from workspace" };
++export const TITLES = { "new-file": "新建文件", "new-folder": "新建文件夹", rename: "重命名", trash: "删除", "add-root": "添加文件夹到工作区", "remove-root": "从工作区移除" };
+ const samples = ["MMMMMMMMMM", "中文文件目录名称示例"];
+ let calibrated, calibrationKey;
+ export const zoom = () => settings().zoom || 1;
+@@ -40,7 +40,7 @@
+ }
+ export function dialogLayout(action, target, view = viewport(), scale = zoom()) {
+   const values = metrics();
+-  const prompt = action === "trash" ? `Permanently delete “${target.path.split("/").pop()}”? This cannot be undone.` : action === "remove-root" ? "Remove this folder from the workspace? Files on disk are kept." : "";
++  const prompt = action === "trash" ? `确定永久删除“${target.path.split("/").pop()}”？此操作不可撤销。` : action === "remove-root" ? "确定从工作区移除此文件夹？磁盘上的文件会保留。" : "";
+   const width = Math.min(Math.max(420, Math.min(560, Math.ceil(Math.max(textWidth(TITLES[action], 13, values), textWidth(target.path, 12, values), textWidth(prompt, 13, values)) + 36))), view ? Math.max(188, view.width / scale - 36) : 560);
+   return { width, height: action === "trash" || action === "remove-root" ? 284 : 252 };
+ }
+--- a/open-files.js
++++ b/open-files.js
+@@ -21,9 +21,9 @@
+   const result = window().platform === "windows"
+     ? await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", '& { param($request) $request | hc connect }', query])
+     : await exec("sh", ["-c", 'printf "%s\\n" "$1" | hc connect', "files-plus", query]);
+-  if (result.code !== 0) throw new Error("Cannot check open files");
++  if (result.code !== 0) throw new Error("无法检查已打开的文件");
+   const reply = result.stdout.split("\n").filter(Boolean).map(line => JSON.parse(line)).find(value => value.id === "files-plus-open");
+-  if (reply?.error || !Array.isArray(reply?.result?.value?.spaces)) throw new Error("Cannot check open files");
++  if (reply?.error || !Array.isArray(reply?.result?.value?.spaces)) throw new Error("无法检查已打开的文件");
+   const qualify = id => on ? `${on}/${id}` : id;
+   const livePanes = new Map(panes().map(pane => [pane.pane, pane]));
+   const liveSpaces = spaces();
+--- a/preferences.js
++++ b/preferences.js
+@@ -1,8 +1,8 @@
+ export const OPEN_LOCATION = "files-plus.open-location";
+ export const OPEN_OPTIONS = [
+-  { value: "tab", label: "Tab in center panel" },
+-  { value: "pane", label: "Pane in center panel" },
+-  { value: "internal", label: "Inside right panel" },
++  { value: "tab", label: "在中间区域新标签打开" },
++  { value: "pane", label: "在中间区域分屏打开" },
++  { value: "internal", label: "在右侧栏内打开" },
+ ];
+ 
+ export function openLocation(value) {
+--- a/roots.js
++++ b/roots.js
+@@ -45,19 +45,19 @@
+ 
+ export function parseConfig(text, file) {
+   let raw;
+-  try { raw = JSON.parse(text); } catch { throw new Error("Invalid workspace JSON"); }
+-  if (!raw || !Array.isArray(raw.folders)) throw new Error("The workspace needs a folders array");
++  try { raw = JSON.parse(text); } catch { throw new Error("工作区 JSON 格式无效"); }
++  if (!raw || !Array.isArray(raw.folders)) throw new Error("工作区需要 folders 数组");
+   const folders = [], seen = new Set();
+   for (const item of raw.folders) {
+     const source = typeof item === "string" ? item : item?.path;
+-    if (typeof source !== "string" || !source.trim()) throw new Error("Each folder needs a path");
+-    if (typeof item === "object" && item.name != null && typeof item.name !== "string") throw new Error("Folder names must be text");
++    if (typeof source !== "string" || !source.trim()) throw new Error("每个文件夹都需要 path");
++    if (typeof item === "object" && item.name != null && typeof item.name !== "string") throw new Error("文件夹名称必须是文本");
+     const path = resolvePath(dirname(file), source);
+     if (seen.has(path)) continue;
+     seen.add(path);
+     folders.push({ name: typeof item === "object" ? item.name || null : null, path, source });
+   }
+-  if (raw.name != null && typeof raw.name !== "string") throw new Error("The workspace name must be text");
++  if (raw.name != null && typeof raw.name !== "string") throw new Error("工作区名称必须是文本");
+   return { name: raw.name || basename(file).replace(/\.herdr-workspace\.json$/, ""), folders, raw };
+ }
+ 
+@@ -77,7 +77,7 @@
+ }
+ export async function loadConfig(file) {
+   const text = await readTextFile(file);
+-  if (text === null) throw new Error("Workspace file not found");
++  if (text === null) throw new Error("未找到工作区文件");
+   return { ...parseConfig(text, file), text };
+ }
+ export async function reloadWorkspace(id) {
+--- a/tree.js
++++ b/tree.js
+@@ -24,7 +24,7 @@
+   const walk = (prefix, root, depth) => {
+     if (depth > 40) return;
+     const list = state.entries.get(prefix);
+-    if (!list?.length) { status(`empty-${prefix}`, list ? "No files" : "Loading files…", depth); return; }
++    if (!list?.length) { status(`empty-${prefix}`, list ? "没有文件" : "正在加载文件…", depth); return; }
+     for (const entry of list) {
+       const path = joinPath(prefix, entry.name), open = state.folders.has(path);
+       out.push({ key: path, id: `file-${path}`, path, root, depth, kind: entry.dir ? "dir" : "file", name: entry.name,
+@@ -39,9 +39,9 @@
+     if (open && !missing) walk(path, path, 1);
+   }
+   else if (state.root) walk(state.root, state.root, 0);
+-  else status("no-folder", "No folder");
++  else status("no-folder", "没有文件夹");
+   if (state.error) status("tree-error", state.error, 0, true);
+-  if (state.limited) status("tree-limit", "File list limited to 500 entries per folder and 5,000 total");
++  if (state.limited) status("tree-limit", "列表上限：每个文件夹 500 项，共 5,000 项");
+   return out;
+ }
+ 
+@@ -72,7 +72,7 @@
+       if (row.kind === "status") return h_flex().id(row.id).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().items_center().pl(8 + row.depth * 18).text_size(12).text_color(row.error ? t.ansi1 : t.muted)
+         .when(entering, el => el.on_size_change((_size, cx) => this.reveal(row.key, cx)))
+         .opacity(hidden ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
+-        .child(div().truncate().tooltip(row.name).when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name));
++        .child(div().truncate().tooltip(row.name).when(row.name === "正在加载文件…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name));
+       const folder = row.kind !== "file";
+       return h_flex().id(row.id).w_full().min_w(0).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_default().disabled(Boolean(row.leaving))
+         .when(entering, el => el.on_size_change((_size, cx) => this.reveal(row.key, cx)))
+--- a/workspace.js
++++ b/workspace.js
+@@ -47,14 +47,14 @@
+ 
+ export async function directory(path, on) {
+   if (!on && appWindow().platform === "windows") {
+-    const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", "& { param($p) $ErrorActionPreference='Stop'; @(Get-ChildItem -LiteralPath $p -Force | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }", path]);
+-    if (r.code !== 0) throw new Error(r.stderr || "Cannot list this folder");
++    const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", "& { param($p) $ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); @(Get-ChildItem -LiteralPath $p -Force | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }", path]);
++    if (r.code !== 0) throw new Error(r.stderr || "无法列出此文件夹");
+     const result = JSON.parse(r.stdout || "[]");
+     return Array.isArray(result) ? result : [result];
+   }
+   const script = 'n=0; for p in "$1"/* "$1"/.[!.]* "$1"/..?*; do [ -e "$p" ] || [ -L "$p" ] || continue; name=${p##*/}; [ "$name" = .git ] && continue; if [ -d "$p" ] && [ ! -L "$p" ]; then kind=d; else kind=f; fi; printf "%s\\0%s\\0" "$kind" "$name"; n=$((n+1)); [ "$n" -gt 500 ] && break; done; test -d "$1"';
+   const r = await exec("sh", ["-c", script, "files-plus", path], { on });
+-  if (r.code !== 0) throw new Error(r.stderr || "Cannot list this folder");
++  if (r.code !== 0) throw new Error(r.stderr || "无法列出此文件夹");
+   const fields = r.stdout.split("\0"), out = [];
+   for (let i = 0; i + 1 < fields.length; i += 2) out.push({ name: fields[i + 1], dir: fields[i] === "d" });
+   return out;
+@@ -273,7 +273,7 @@
+         if (!this.current(context) || this.openRequest !== request) return;
+         if (existing) { focusOpenFile(existing); return; }
+         if (destination === "pane" && !pane) {
+-          notify({ title: "Select a center pane before opening a file", level: "info" });
++          notify({ title: "请先在中间区域选择一个分屏", level: "info" });
+           return;
+         }
+         const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
+@@ -288,7 +288,7 @@
+           run("layout.select", { stack, child: "preview-plus" });
+         } else this.show(path, cx);
+       } catch {
+-        if (this.current(context) && this.openRequest === request) notify({ title: "Cannot check open files. Try again.", level: "error" });
++        if (this.current(context) && this.openRequest === request) notify({ title: "无法检查已打开的文件，请重试。", level: "error" });
+       }
+       cx.notify();
+     });
+@@ -310,12 +310,12 @@
+         if (text === null || text.includes("\0")) {
+           changed = Boolean(this.code);
+           this.code?.release(); this.code = null;
+-          this.fileError = text === null ? "This file is no longer available" : "Binary file, no text preview"; changed ||= this.fileError !== previousError; return;
+-        }
+-        const value = text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text;
++          this.fileError = text === null ? "此文件已不可用" : "二进制文件，无文本预览"; changed ||= this.fileError !== previousError; return;
++        }
++        const value = text.length > 400000 ? text.slice(0, 400000) + "\n…（文件已截断）" : text;
+         if (this.code && this.previewText === value && this.previewStyle === JSON.stringify(sourceStyle())) return;
+         this.previewText = value; changed = true; this.updatePreview();
+-      } catch { if (this.previewRequest === request && this.current(context)) { changed = Boolean(this.code); this.code?.release(); this.code = null; this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; changed ||= this.fileError !== previousError; } }
++      } catch { if (this.previewRequest === request && this.current(context)) { changed = Boolean(this.code); this.code?.release(); this.code = null; this.fileError = "无法预览此文件（二进制、过大或无法读取）"; changed ||= this.fileError !== previousError; } }
+       finally { if (changed && this.previewRequest === request && this.current(context)) cx.notify(); }
+     });
+   }
+@@ -340,7 +340,7 @@
+     return v_flex().id("file-viewer").size_full().min_w(0).min_h(0).bg(t.background).text_color(t.foreground).font_family(font).text_size(13)
+       .child(div().h(42).px(14).flex().items_center().flex_none().border_b(0.5).border_color(t.border)
+         .child(div().truncate().tooltip(this.file).font_semibold().child(basename(this.file))))
+-      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted).child(this.fileError || "Loading file…"));
++      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted).child(this.fileError || "正在加载文件…"));
+   }
+   target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
+   menu(path, kind, root, event, cx) {
+@@ -382,7 +382,7 @@
+     if (lookChanged || chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this, look });
+     this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
+   }
+-  panelTitle() { const cwd = this.location().cwd || this.root; return cwd ? basename(cwd) : "Files"; }
++  panelTitle() { const cwd = this.location().cwd || this.root; return cwd ? basename(cwd) : "文件"; }
+   scheduleFit(cx, cause = "background") {
+     const fit = props()?.fit;
+     if (!fit?.node || this.file) return;
+@@ -446,11 +446,11 @@
+       .on_mouse_move((event, cx) => dragMove(this, event, cx))
+       .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
+       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
+-        .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground))
++        .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("返回文件列表").tooltip("返回文件列表").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground))
+           .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+           .on_click((_event, cx) => { cx.stop_propagation(); this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
+         .child(div().id("files-title").flex_1().min_w(0).truncate().font_semibold().tooltip(loc.cwd || this.root || "").child(this.panelTitle()))
+-        .child(h_flex().id("add-folder").size(24).items_center().justify_center().rounded(6).cursor_default().text_color(add ? t.muted : t.dim).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
++        .child(h_flex().id("add-folder").size(24).items_center().justify_center().rounded(6).cursor_default().text_color(add ? t.muted : t.dim).role("button").accessibility_label("添加文件夹").tooltip("添加文件夹…").disabled(!add)
+           .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
+             if (!add) return;
+             const root = entry?.folders[0]?.path || this.root;
+@@ -459,7 +459,7 @@
+             cx.stop_propagation();
+           }).child(svg("mods/files-plus/plus.svg").size(14)))
+         .when(Boolean(this.file), el => el.child(div().max_w(140).truncate().text_size(12).text_color(t.dim).tooltip(this.file).child(title)))
+-        .child(h_flex().id("files-settings").size(24).flex_none().items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("Files settings").tooltip("Files settings").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
++        .child(h_flex().id("files-settings").size(24).flex_none().items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("文件面板设置").tooltip("文件面板设置").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+           .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+           .on_click((_event, cx) => {
+             cx.stop_propagation();
+@@ -469,7 +469,7 @@
+       .when(!this.file, el => el.child(this.treeView))
+       .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
+         .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
+-          .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
++          .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "正在加载文件…"))));
+   }
+   close() {
+     this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null;

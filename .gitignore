@@ -1,0 +1,4 @@
+upstream/
+**/gpui-kit.d.ts
+**/jsconfig.json
+**/.cache/

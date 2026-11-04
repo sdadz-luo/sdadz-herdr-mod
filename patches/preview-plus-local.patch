@@ -1,0 +1,183 @@
+--- a/main.js
++++ b/main.js
+@@ -50,7 +50,7 @@
+         if (typeof draft.file === "string" && typeof draft.base === "string" && typeof draft.text === "string")
+           this.documents.set(draft.file, { ...draft, saving: false });
+       }
+-    } catch { this.draftError = "Saved drafts could not be read."; }
++    } catch { this.draftError = "无法读取已保存的草稿。"; }
+     this.history = []; this.watchers = new Map(); this.watchedFiles = new Set();
+     this.viewport = { width: 400, height: 500 }; this.zoom = null; this.page = 1; this.total = 0;
+     this.pan = { x: 0, y: 0 };
+@@ -122,7 +122,7 @@
+       if (drafts.length) localStorage.setItem("preview-plus.drafts", JSON.stringify(drafts));
+       else localStorage.removeItem("preview-plus.drafts");
+       this.draftError = null;
+-    } catch { this.draftError = "Draft recovery is unavailable. Save before closing."; }
++    } catch { this.draftError = "草稿恢复不可用，关闭前请先保存。"; }
+   }
+ 
+   setSource(source, cx) {
+@@ -162,7 +162,7 @@
+       try {
+         await writeTextFile(doc.file, text, expected);
+         doc.base = text; doc.external = false;
+-      } catch (error) { doc.saveError = `Save failed: ${String(error.message || error)}. Your draft is retained.`; }
++      } catch (error) { doc.saveError = `保存失败：${String(error.message || error)}。草稿已保留。`; }
+       finally {
+         doc.saving = false; this.persistDrafts();
+         if (!this.closed) cx.notify();
+@@ -214,8 +214,8 @@
+             this.document = draft; draft.external = value !== draft.base;
+             this.text = draft.text; this.truncated = false;
+           } else {
+-            if (value === null) throw new Error("This file is no longer available.");
+-            if (value.includes("\0")) throw new Error("This binary file has no text preview.");
++            if (value === null) throw new Error("此文件已不可用。");
++            if (value.includes("\0")) throw new Error("二进制文件没有文本预览。");
+             this.truncated = value.length > TEXT_LIMIT;
+             this.text = this.truncated ? value.slice(0, TEXT_LIMIT) + "\n\n… (file truncated)" : value;
+             if (!selected.on && !this.truncated) {
+@@ -422,48 +422,48 @@
+       .on_key_down((event, cx) => this.keyDown(event, cx))
+       .child(h_flex().id("preview-toolbar").h(42).flex_none().px(8).gap(2).items_center().border_b(0.5).border_color(colors.border)
+         .when(Boolean(file) && panelFrame, el => el.child(button("preview-back", "←", colors, cx => this.back(cx))))
+-        .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().when(Boolean(file), el => el.tooltip(file)).child(file ? basename(file) : "Files"))
++        .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().when(Boolean(file), el => el.tooltip(file)).child(file ? basename(file) : "文件"))
+         .when(this.dirty() || Boolean(this.document?.saving), el => el.child(div().id("preview-dirty").size(6).mr(4).flex_none().rounded_full().bg(colors.muted)
+-          .tooltip(this.document?.saving ? "Saving…" : "Unsaved changes").accessibility_label(this.document?.saving ? "Saving" : "Unsaved changes")))
++          .tooltip(this.document?.saving ? "正在保存…" : "未保存的修改").accessibility_label(this.document?.saving ? "Saving" : "未保存的修改")))
+         .when(Boolean(this.code) && !this.document, el => el.child(div().size(16).flex_none().flex().items_center().justify_center().text_color(colors.dim)
+-          .tooltip(this.selected.on ? "Remote file is read-only" : "Truncated file is read-only").accessibility_label("Read-only")
++          .tooltip(this.selected.on ? "远程文件只读" : "截断的文件只读").accessibility_label("只读")
+           .child(svg("mods/preview-plus/icons/lock.svg").size(12))))
+         .when(type === "markdown", el => el
+-          .child(button("preview-mode", this.source ? "Preview" : "Source", colors, cx => this.setSource(!this.source, cx), Boolean(this.code), false, this.source ? "preview" : "code")))
++          .child(button("preview-mode", this.source ? "预览" : "源码", colors, cx => this.setSource(!this.source, cx), Boolean(this.code), false, this.source ? "preview" : "code")))
+         .when(Boolean(file) && !media, el => el
+-          .child(button("preview-wrap", "Wrap lines", colors, cx => this.toggleWrap(cx), Boolean(this.code) && (type !== "markdown" || this.source), this.wrap)))
++          .child(button("preview-wrap", "自动换行", colors, cx => this.toggleWrap(cx), Boolean(this.code) && (type !== "markdown" || this.source), this.wrap)))
+         .when(Boolean(this.document), el => el
+-          .when(this.dirty(), el => el.child(button("preview-discard", this.confirmDiscard ? "Confirm discard" : "Discard changes", colors, cx => this.discard(cx), !this.document.saving, this.confirmDiscard, this.confirmDiscard ? "check" : "undo")))
+-          .when(Boolean(this.confirmDiscard), el => el.child(button("preview-cancel-discard", "Cancel discard", colors, cx => { this.confirmDiscard = false; cx.notify(); })))
+-          .child(button("preview-save", this.document.saving ? "Saving…" : `Save (${window()?.platform === "macos" ? "⌘S" : "Ctrl+S"})`, colors, cx => this.save(cx), this.dirty() && !this.document.saving)))
+-        .when(Boolean(file), el => el.child(button("preview-open", "Open", colors, cx => this.open(cx), !this.selected.on)))
+-        .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
++          .when(this.dirty(), el => el.child(button("preview-discard", this.confirmDiscard ? "确认放弃" : "放弃修改", colors, cx => this.discard(cx), !this.document.saving, this.confirmDiscard, this.confirmDiscard ? "check" : "undo")))
++          .when(Boolean(this.confirmDiscard), el => el.child(button("preview-cancel-discard", "取消放弃", colors, cx => { this.confirmDiscard = false; cx.notify(); })))
++          .child(button("preview-save", this.document.saving ? "正在保存…" : `保存 (${window()?.platform === "macos" ? "⌘S" : "Ctrl+S"})`, colors, cx => this.save(cx), this.dirty() && !this.document.saving)))
++        .when(Boolean(file), el => el.child(button("preview-open", "打开", colors, cx => this.open(cx), !this.selected.on)))
++        .when(!file, el => el.child(button("preview-refresh", "刷新", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
+       .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
+-      .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child("File changed on disk. Your draft is retained; saving checks for conflicts.")))
++      .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child("文件已在磁盘上变化。草稿已保留，保存时会检查冲突。")))
+       .when(Boolean(this.document?.saveError || this.draftError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.document?.saveError || this.draftError)))
+       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
+-        .child(button("preview-fit", "Fit", colors, cx => this.setZoom(null, cx), Boolean(this.media), this.zoom === null))
++        .child(button("preview-fit", "适应窗口", colors, cx => this.setZoom(null, cx), Boolean(this.media), this.zoom === null))
+         .child(button("preview-zoom-out", "−", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) / 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) > 0.05))
+         .child(h_flex().w(76).h(28).flex_none().items_center().justify_center()
+           .border(0.5).border_color(colors.border).rounded(6).text_color(colors.foreground)
+           .child(Input.new(this.zoomInput).id("preview-zoom-percent")
+             .w(Math.min(70, Math.max(24, this.zoomInput.value().length * 7.2 + 2))).h(24).px(0)
+-            .font_family("Geist Mono").text_size(12).disabled(!this.media).accessibility_label("Zoom percentage (5–800%)")))
++            .font_family("Geist Mono").text_size(12).disabled(!this.media).accessibility_label("缩放百分比（5–800%）")))
+         .child(button("preview-zoom-in", "+", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) * 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) < 8))
+         .child(div().flex_1())
+         .when(type === "pdf", el => el
+-          .child(button("preview-previous", "Previous", colors, cx => this.turnPage(-1, cx), !this.loading && this.total > 0 && this.page > 1))
++          .child(button("preview-previous", "上一页", colors, cx => this.turnPage(-1, cx), !this.loading && this.total > 0 && this.page > 1))
+           .child(div().px(6).text_size(12).text_color(colors.muted).child(`${this.page} / ${this.total || "…"}`))
+-          .child(button("preview-next", "Next", colors, cx => this.turnPage(1, cx), !this.loading && this.page < this.total)))))
++          .child(button("preview-next", "下一页", colors, cx => this.turnPage(1, cx), !this.loading && this.page < this.total)))))
+       .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.actionError)))
+-      .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(this.selected?.on ? "Inline images are only available for local files." : "Some inline images could not be loaded.")))
++      .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(this.selected?.on ? "仅本地文件可内嵌图片。" : "部分内嵌图片无法加载。")))
+       .when(!file && Boolean(this.tree), el => el.child(this.tree.render(colors, (value, cx) => this.show(value, cx))))
+-      .when(!file && !this.tree, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "Pass an absolute file path to Preview Plus." : "Select a file in Files Plus.")))
++      .when(!file && !this.tree, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "请传入绝对文件路径。" : "请在 Files Plus 中选择文件。")))
+       .when(Boolean(file), el => el.child(this.body(type, colors)));
+   }
+ 
+   body(type, colors) {
+-    if (this.error || this.loading) return div().flex_1().p(16).text_size(12).text_color(colors.muted).child(this.error || "Loading preview…");
++    if (this.error || this.loading) return div().flex_1().p(16).text_size(12).text_color(colors.muted).child(this.error || "正在加载预览…");
+     if (this.media) {
+       const size = this.mediaSize();
+       const x = (this.viewport.width - size.width) / 2 + this.pan.x;
+--- a/media.js
++++ b/media.js
+@@ -113,23 +113,23 @@
+ `;
+ 
+ export async function loadMedia(target, page = 1, type = "image") {
+-  if (target.on) throw new Error("Image and PDF previews are only available for local files.");
++  if (target.on) throw new Error("仅本地文件可预览图片和 PDF。");
+   const platform = window()?.platform;
+-  if (type === "pdf" && platform !== "macos") throw new Error("PDF previews require macOS and PDFKit. Use Open to view this file.");
++  if (type === "pdf" && platform !== "macos") throw new Error("PDF 预览需要 macOS 与 PDFKit。请用“打开”查看此文件。");
+   const cache = `${appHome()}/mods/preview-plus/.cache`;
+   const result = platform === "macos"
+     ? await exec("osascript", ["-l", "JavaScript", "-e", MAC_MEDIA, target.file, cache, String(page), type])
+     : await exec(platform === "windows" ? "python" : "python3", ["-c", PYTHON_IMAGE, target.file, cache]);
+   if (result.code !== 0) throw new Error(result.stderr.trim() || "Cannot preview this file.");
+   const media = JSON.parse(result.stdout.trim());
+-  if (!media.path?.startsWith("mods/preview-plus/.cache/") || !(media.width > 0 && media.height > 0 && media.pages > 0)) throw new Error("The media preview returned invalid data.");
++  if (!media.path?.startsWith("mods/preview-plus/.cache/") || !(media.width > 0 && media.height > 0 && media.pages > 0)) throw new Error("媒体预览返回了无效数据。");
+   return media;
+ }
+ 
+ export async function openFile(target) {
+-  if (target.on) throw new Error("Open is only available for local files.");
++  if (target.on) throw new Error("仅本地文件可打开。");
+   const platform = window()?.platform;
+   const command = platform === "macos" ? "open" : platform === "windows" ? "explorer.exe" : "xdg-open";
+   const result = await exec(command, [target.file]);
+-  if (result.code !== 0) throw new Error("The system application could not open this file.");
++  if (result.code !== 0) throw new Error("系统应用无法打开此文件。");
+ }
+--- a/paths.js
++++ b/paths.js
+@@ -35,9 +35,9 @@
+   if (/^https?:\/\//i.test(link)) return { url: link };
+   if (link.startsWith("//")) return { url: `https:${link}` };
+   if (!link || link.startsWith("#")) return { anchor: true };
+-  if (/^[a-z][a-z\d+.-]*:/i.test(link) && !/^[a-z]:[\\/]/i.test(link) && !link.startsWith("file:///")) throw new Error("This link type cannot be opened here.");
++  if (/^[a-z][a-z\d+.-]*:/i.test(link) && !/^[a-z]:[\\/]/i.test(link) && !link.startsWith("file:///")) throw new Error("此链接类型无法在此打开。");
+   let path = link.replace(/[?#].*$/, "").replace(/^file:\/\//, "");
+-  try { path = decodeURIComponent(path); } catch { throw new Error("This link contains an invalid file path."); }
++  try { path = decodeURIComponent(path); } catch { throw new Error("此链接包含无效的文件路径。"); }
+   return { file: join(dirname(file), path) };
+ }
+ 
+--- a/tree.js
++++ b/tree.js
+@@ -8,15 +8,15 @@
+ 
+ async function directory(path, on) {
+   if (!on && window()?.platform === "windows") {
+-    const command = "& { param($p) @(Get-ChildItem -LiteralPath $p -Force -ErrorAction Stop | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress } '" + path.replaceAll("'", "''") + "'";
++    const command = "& { param($p) [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); @(Get-ChildItem -LiteralPath $p -Force -ErrorAction Stop | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress } '" + path.replaceAll("'", "''") + "'";
+     const result = await exec("powershell", ["-NoProfile", "-Command", command]);
+-    if (result.code !== 0) throw new Error(result.stderr || "Cannot list this folder");
++    if (result.code !== 0) throw new Error(result.stderr || "无法列出此文件夹");
+     const entries = JSON.parse(result.stdout || "[]");
+     return Array.isArray(entries) ? entries : [entries];
+   }
+   const script = 'n=0; for p in "$1"/* "$1"/.[!.]* "$1"/..?*; do [ -e "$p" ] || [ -L "$p" ] || continue; name=${p##*/}; [ "$name" = .git ] && continue; if [ -d "$p" ] && [ ! -L "$p" ]; then kind=d; else kind=f; fi; printf "%s\\0%s\\0" "$kind" "$name"; n=$((n+1)); [ "$n" -gt 500 ] && break; done; test -d "$1"';
+   const result = await exec("sh", ["-c", script, "preview-plus", path], { on });
+-  if (result.code !== 0) throw new Error(result.stderr || "Cannot list this folder");
++  if (result.code !== 0) throw new Error(result.stderr || "无法列出此文件夹");
+   const fields = result.stdout.split("\0"), entries = [];
+   for (let i = 0; i + 1 < fields.length; i += 2) entries.push({ name: fields[i + 1], dir: fields[i] === "d" });
+   return entries;
+@@ -117,7 +117,7 @@
+ 
+   render(colors, openFile) {
+     return v_flex().id("preview-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], colors, openFile))
+-      .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.error || (this.loading ? "Loading files…" : this.location.cwd ? "No files" : "No folder"))))
+-      .when(this.limited, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child("File list limited to 500 entries per folder and 5,000 total.")));
++      .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.error || (this.loading ? "正在加载文件…" : this.location.cwd ? "没有文件" : "没有文件夹"))))
++      .when(this.limited, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child("列表上限：每个文件夹 500 项，共 5,000 项。")));
+   }
+ }
