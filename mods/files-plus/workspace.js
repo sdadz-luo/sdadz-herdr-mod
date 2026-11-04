@@ -22,7 +22,7 @@ const TREE_SCRIPT = [
   "const fs=require('fs'),path=require('path');",
   "const root=process.argv[1],limit=Number(process.argv[2])||500,depth=Number(process.argv[3])||2,spread=Number(process.argv[4])||8;",
   "const out={};",
-  "function list(dir){let e;try{e=fs.readdirSync(dir,{withFileTypes:true})}catch{return null}const rows=[];for(const x of e){if(x.name==='.git')continue;if(rows.length>=limit)break;rows.push([x.name,x.isDirectory()])}return rows}",
+  "function list(dir){let h;try{h=fs.opendirSync(dir)}catch{return null}const rows=[];try{for(;;){const e=h.readSync();if(!e)break;if(e.name==='.git')continue;if(rows.length>=limit)break;rows.push([e.name,e.isDirectory()])}}catch{}finally{try{h.closeSync()}catch{}}return rows}",
   "function walk(dir,level,key){const rows=list(dir);out[key]=rows;if(!rows||level<=1)return;let n=0;for(const [name,isDir] of rows){if(!isDir)continue;if(n++>=spread)break;walk(path.join(dir,name),level-1,key?key+'/'+name:name)}}",
   "walk(root,depth,'');process.stdout.write(JSON.stringify(out));",
 ].join("");
@@ -166,12 +166,20 @@ export class FilesPanel extends View {
     if (this.on || appWindow().platform !== "windows") return false;
     let task = this.trees.get(path);
     if (!task) {
+      const context = this.context;
       task = directoryTree(path).then(tree => {
+        // The folder or its machine changed while node was reading: its paths
+        // belong to the old view and must not fill the new cache.
+        if (this.context !== context) return false;
         const at = Date.now();
         for (const [rel, rows] of Object.entries(tree)) {
           if (!Array.isArray(rows)) continue;
           const dir = rel ? joinPath(path, rel) : path;
           this.dirCache.set(dir, { at, list: rows.map(([name, isDir]) => ({ name, dir: isDir })) });
+        }
+        if (this.dirCache.size > 300) {
+          const now = Date.now();
+          for (const [key, value] of this.dirCache) if (now - value.at > CACHE_MS) this.dirCache.delete(key);
         }
         return true;
       }).catch(() => false).finally(() => { if (this.trees.get(path) === task) this.trees.delete(path); });
@@ -182,8 +190,8 @@ export class FilesPanel extends View {
   // Read the next level now, so expanding into it needs no wait.
   prefetch(path, cx) {
     if (this.on || appWindow().platform !== "windows") return;
-    const list = this.entries.get(path), child = list?.find(entry => entry.dir);
-    if (child && this.cached(joinPath(path, child.name))) return;
+    const dirs = this.entries.get(path)?.filter(entry => entry.dir) ?? [];
+    if (!dirs.length || this.cached(joinPath(path, dirs[0].name))) return;
     cx.spawn(async () => { await this.localTree(path); });
   }
   async loadFolder(path, context) {
