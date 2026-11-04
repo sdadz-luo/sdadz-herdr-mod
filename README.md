@@ -22,7 +22,7 @@ Herdr 只从 app home 加载 mod，所以这里保存源码与备份，装好后
 ```text
 herdr-mods/
 ├── mods/
-│   ├── files-plus/      本地修改：汉化 + Windows 中文文件名修复
+│   ├── files-plus/      本地修改：汉化、中文文件名修复、node 列目录与预取
 │   ├── preview-plus/    本地修改：同上
 │   ├── git-changes/     本地修改：整体汉化（替代自带 changes 面板）
 │   └── tabs-graph/      克隆自带 tabs，去掉已删除的 Git 按钮

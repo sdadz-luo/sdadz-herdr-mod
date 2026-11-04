@@ -13,6 +13,19 @@ import { OPEN_LOCATION, openLocation } from "./preferences.js";
 import { findOpenFile, focusOpenFile } from "./open-files.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
+// Listing a folder starts a process on Windows, so keep results briefly and
+// read two levels at a time: expanding into a prefetched folder needs no wait.
+const CACHE_MS = 10000, TREE_DEPTH = 2, TREE_SPREAD = 8;
+// node starts in ~70ms where powershell needs ~350ms, and prints UTF-8, so it
+// lists the folder and its first subfolders in one call. Falls back to directory().
+const TREE_SCRIPT = [
+  "const fs=require('fs'),path=require('path');",
+  "const root=process.argv[1],limit=Number(process.argv[2])||500,depth=Number(process.argv[3])||2,spread=Number(process.argv[4])||8;",
+  "const out={};",
+  "function list(dir){let e;try{e=fs.readdirSync(dir,{withFileTypes:true})}catch{return null}const rows=[];for(const x of e){if(x.name==='.git')continue;if(rows.length>=limit)break;rows.push([x.name,x.isDirectory()])}return rows}",
+  "function walk(dir,level,key){const rows=list(dir);out[key]=rows;if(!rows||level<=1)return;let n=0;for(const [name,isDir] of rows){if(!isDir)continue;if(n++>=spread)break;walk(path.join(dir,name),level-1,key?key+'/'+name:name)}}",
+  "walk(root,depth,'');process.stdout.write(JSON.stringify(out));",
+].join("");
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
 const RICH = /\.(md|markdown|png|jpe?g|webp|svg|pdf)$/i;
 const collator = globalThis.Intl?.Collator ? new globalThis.Intl.Collator() : { compare: (a, b) => a.localeCompare(b) };
@@ -60,6 +73,16 @@ export async function directory(path, on) {
   return out;
 }
 
+// Windows only: a folder and its first subfolders in one node call, as
+// { relativePath: [[name, isDirectory], ...] }, so later expands hit the cache.
+export async function directoryTree(path) {
+  const r = await exec("node", ["-e", TREE_SCRIPT, path, String(PER_FOLDER + 1), String(TREE_DEPTH), String(TREE_SPREAD)]);
+  if (r.code !== 0) throw new Error(r.stderr || "无法列出此文件夹");
+  const tree = JSON.parse(r.stdout || "{}");
+  if (!tree || typeof tree !== "object" || Array.isArray(tree)) throw new Error("无法解析目录列表");
+  return tree;
+}
+
 export class FilesPanel extends View {
   location() {
     const loc = location(this.browsingLocation);
@@ -68,7 +91,7 @@ export class FilesPanel extends View {
   }
   initPanel(cx) {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
-    this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map();
+    this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map(); this.dirCache = new Map(); this.trees = new Map();
     this.look = appearance();
     this.lookKey = JSON.stringify(this.look);
     this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
@@ -123,18 +146,59 @@ export class FilesPanel extends View {
     });
   }
   current(context, loc = this.location()) { return this.context === context && (this.role === "preview" ? context !== null : loc.key === context); }
+  // A recent listing, unless the folder is on another machine: remote folders
+  // are polled, so their cache would hide changes between polls.
+  cached(path) {
+    if (this.on) return null;
+    const hit = this.dirCache.get(path);
+    return hit && Date.now() - hit.at < CACHE_MS ? hit.list : null;
+  }
   dropFolder(path) {
     this.entryCount -= this.entries.get(path)?.length || 0;
     const removed = this.entries.delete(path), limited = this.limits.delete(path);
     this.pending.delete(path); this.limited = this.limits.size > 0;
+    this.dirCache.delete(path);
     return removed || limited;
+  }
+  // Fill the cache with this folder and its first subfolders in one process.
+  // Requests for the same folder share one read.
+  async localTree(path) {
+    if (this.on || appWindow().platform !== "windows") return false;
+    let task = this.trees.get(path);
+    if (!task) {
+      task = directoryTree(path).then(tree => {
+        const at = Date.now();
+        for (const [rel, rows] of Object.entries(tree)) {
+          if (!Array.isArray(rows)) continue;
+          const dir = rel ? joinPath(path, rel) : path;
+          this.dirCache.set(dir, { at, list: rows.map(([name, isDir]) => ({ name, dir: isDir })) });
+        }
+        return true;
+      }).catch(() => false).finally(() => { if (this.trees.get(path) === task) this.trees.delete(path); });
+      this.trees.set(path, task);
+    }
+    return await task;
+  }
+  // Read the next level now, so expanding into it needs no wait.
+  prefetch(path, cx) {
+    if (this.on || appWindow().platform !== "windows") return;
+    const list = this.entries.get(path), child = list?.find(entry => entry.dir);
+    if (child && this.cached(joinPath(path, child.name))) return;
+    cx.spawn(async () => { await this.localTree(path); });
   }
   async loadFolder(path, context) {
     if (!this.current(context) || !this.folders.has(path)) return false;
     const entries = this.entries, pending = this.pending, request = {};
     pending.set(path, request);
     try {
-      const list = await directory(path, this.on);
+      let hit = this.cached(path);
+      if (!hit) {
+        await this.localTree(path);
+        if (!this.current(context) || !this.folders.has(path)) return false;
+        hit = this.cached(path);
+      }
+      const list = hit ?? await directory(path, this.on);
+      if (!hit) this.dirCache.set(path, { at: Date.now(), list });
       if (entries !== this.entries || pending.get(path) !== request || !this.current(context) || !this.folders.has(path)) return false;
       const used = this.entryCount - (this.entries.get(path)?.length || 0);
       const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
@@ -155,7 +219,7 @@ export class FilesPanel extends View {
     if (context !== this.context) {
       this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
       this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
-      this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.show(null); this.error = null; this.loading = null;
+      this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.dirCache.clear(); this.trees.clear(); this.show(null); this.error = null; this.loading = null;
       this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
       this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
       this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
@@ -179,7 +243,11 @@ export class FilesPanel extends View {
         if (!same(roots, this.rootInfo)) this.treeVersion++;
         this.rootInfo = roots;
         // Drop entries for folders removed on disk so their budget can be reused.
-        const queue = [...(options.paths || this.folders)], listing = queue.length > 0;
+        // A refresh without explicit paths keeps what a recent read already covers.
+        const forced = options.paths ? new Set(options.paths) : null;
+        if (forced) for (const path of forced) this.dirCache.delete(path);
+        const queue = forced ? [...forced] : [...this.folders].filter(path => !this.entries.has(path) || !this.cached(path));
+        const listing = queue.length > 0;
         let readError = null;
         await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
           while (queue.length && generation === this.generation) {
@@ -222,6 +290,7 @@ export class FilesPanel extends View {
         if (!same(this.marks, marks)) { this.marks = marks; this.treeVersion++; }
         if (listing) this.error = readError;
         for (const root of roots) if (root.exists) this.watch(root.path, cx);
+        for (const root of roots) if (root.exists) this.prefetch(root.path, cx);
         if (this.file) this.show(this.file, cx);
       } catch (error) { if (this.current(context) && generation === this.generation) this.error = error.message || String(error); }
       finally {
@@ -256,7 +325,7 @@ export class FilesPanel extends View {
           let completed = false;
           try { completed = await this.loadFolder(path, context); }
           catch (error) { if (this.current(context)) { completed = true; this.error = error.message || String(error); } }
-          finally { if (completed && pending === this.pending) { this.revealPath = path; this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
+          finally { if (completed && pending === this.pending) { this.revealPath = path; this.treeVersion++; this.syncTree(cx); this.revealPath = null; this.prefetch(path, cx); cx.notify(); } }
         });
       }
     }

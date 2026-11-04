@@ -37,7 +37,7 @@ herdr-mods/
 
 | mod | 上游 | 状态 |
 | --- | --- | --- |
-| files-plus | `linziyanleo/herdr-mods` | 本地汉化，有补丁 |
+| files-plus | `linziyanleo/herdr-mods` | 本地汉化 + 目录列举优化，有补丁 |
 | preview-plus | `linziyanleo/herdr-mods` | 本地汉化，有补丁 |
 | git-changes | `aBER0724/herdr-git-changes` | 本地汉化，有补丁 |
 | tabs-graph | 无（克隆 Herdr 自带 `tabs`） | 本地修改，无补丁 |
@@ -74,6 +74,22 @@ python scripts/mkpatch.py <上游 mod 目录> mods/<name> patches/<name>-local.p
 ```
 
 补丁冲突时手动合并，再用同一脚本重新生成，不要手改补丁。
+
+## files-plus 的目录读取
+
+Windows 上列目录是启动进程，原实现每次用 PowerShell（约 350ms），展开多层
+会逐层等待。现在改为：
+
+- 本地 Windows 用 `node -e` 一次读取目标目录和最多 8 个子目录（约 70ms），
+  结果存 10 秒缓存；展开命中缓存时直接渲染。
+- 展开后后台预取下一层；同一目录的并发请求共用一次读取。
+- node 不可用或读取失败时回退 PowerShell 单目录读取；远端机器仍用 `sh`
+  并轮询，不走缓存。
+- 路径始终作为 `node` 的独立参数传入，不拼进命令字符串。
+
+改动集中在 `workspace.js` 的 `directory()` / `directoryTree()` /
+`localTree()` / `prefetch()` 与 `loadFolder()`。上游更新后补丁可能冲突，
+按补丁流程重新生成。
 
 ## 汉化约定
 
