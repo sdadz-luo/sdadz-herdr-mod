@@ -329,22 +329,26 @@ export class FilesPanel extends View {
   openFile(path, root, cx) {
     this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
     const request = this.openRequest = {};
-    const stack = props()?.previewStack, context = this.context, space = this.spaceId, on = this.on;
+    const stack = props()?.previewStack, space = this.spaceId, on = this.on;
     const destination = openLocation(shared(OPEN_LOCATION)), pane = focused()?.pane;
+    // A click must open what it named. Only a newer click, or the panel going away,
+    // cancels it: opening the first file moves focus to the new tab, and a location
+    // key that shifts with focus would otherwise drop every click after the first.
+    const superseded = () => this.closed || this.openRequest !== request;
     cx.spawn(async cx => {
+      const existing = await findOpenFile(path, on, space).catch(() => null);
+      if (superseded()) return;
+      if (existing) { focusOpenFile(existing); return; }
+      if (destination === "pane" && !pane) {
+        notify({ title: "请先在中间区域选择一个分屏", level: "info" });
+        return;
+      }
+      const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
+      if (superseded()) return;
       try {
-        const existing = await findOpenFile(path, on, space);
-        if (!this.current(context) || this.openRequest !== request) return;
-        if (existing) { focusOpenFile(existing); return; }
-        if (destination === "pane" && !pane) {
-          notify({ title: "请先在中间区域选择一个分屏", level: "info" });
-          return;
-        }
-        const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
-        if (!this.current(context) || this.openRequest !== request) return;
+        const mod = rich ? "preview-plus" : "files-plus";
+        const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
         if (destination !== "internal") {
-          const mod = rich ? "preview-plus" : "files-plus";
-          const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
           if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
           else run("pane.split", { pane, direction: "right", mod, props: previewProps });
         } else if (rich) {
@@ -352,7 +356,7 @@ export class FilesPanel extends View {
           run("layout.select", { stack, child: "preview-plus" });
         } else this.show(path, cx);
       } catch {
-        if (this.current(context) && this.openRequest === request) notify({ title: "无法检查已打开的文件，请重试。", level: "error" });
+        if (!superseded()) notify({ title: "无法打开文件，请重试。", level: "error" });
       }
       cx.notify();
     });

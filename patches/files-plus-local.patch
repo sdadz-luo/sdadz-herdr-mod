@@ -277,18 +277,80 @@
  }
 --- a/open-files.js
 +++ b/open-files.js
-@@ -21,9 +21,9 @@
-   const result = window().platform === "windows"
-     ? await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", '& { param($request) $request | hc connect }', query])
-     : await exec("sh", ["-c", 'printf "%s\\n" "$1" | hc connect', "files-plus", query]);
+@@ -15,20 +15,65 @@
+   return "/" + parts.join("/");
+ };
+ 
++// `hc connect` answers one JSON-RPC request per line on stdin. Two Windows traps:
++// PowerShell re-parses a JSON argument on its command line as script, and `hc` drops
++// its reply when stdin closes before it writes. So the request travels as hex (nothing
++// for an argument parser to break) and node keeps stdin open until the reply arrives.
++const QUERY = [
++  "const {spawn}=require('child_process');",
++  "const req=Buffer.from(process.argv[1],'hex').toString('utf8');",
++  "const p=spawn('hc',['connect'],{stdio:['pipe','pipe','ignore']});",
++  "let out='';",
++  // Without clearing this timer node stays alive for the full timeout after hc is done.
++  "const timer=setTimeout(()=>{try{p.stdin.end()}catch{}},1500);",
++  "p.stdout.setEncoding('utf8');",
++  "p.stdout.on('data',c=>{out+=c;if(out.includes('\\n'))p.stdin.end();});",
++  "p.stdin.on('error',()=>{});",
++  "p.on('error',()=>{clearTimeout(timer);process.exit(1)});",
++  "p.on('close',()=>{clearTimeout(timer);process.stdout.write(out)});",
++  "p.stdin.write(req+'\\n');",
++].join("");
++
++const hex = text => {
++  const bytes = [];
++  for (const char of text) {
++    const code = char.codePointAt(0);
++    if (code < 0x80) bytes.push(code);
++    else if (code < 0x800) bytes.push(0xc0 | (code >> 6), 0x80 | (code & 63));
++    else if (code < 0x10000) bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
++    else bytes.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 63), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
++  }
++  return bytes.map(byte => byte.toString(16).padStart(2, "0")).join("");
++};
++
++/** The open spaces document, or null when the app cannot be asked. */
++async function spacesDocument(request) {
++  const result = window().platform === "windows"
++    ? await exec("node", ["-e", QUERY, hex(request)])
++    : await exec("sh", ["-c", 'printf "%s\\n" "$1" | hc connect', "files-plus", request]);
++  if (result.code !== 0) return null;
++  for (const line of result.stdout.split("\n")) {
++    if (!line.trim()) continue;
++    try {
++      const reply = JSON.parse(line);
++      if (reply?.id === "files-plus-open" && !reply.error && Array.isArray(reply.result?.value?.spaces)) return reply.result.value.spaces;
++    } catch {}
++  }
++  return null;
++}
++
+ export async function findOpenFile(file, on, preferredSpace) {
+   if (!panes().some(pane => viewer(pane.mod))) return null;
+-  const query = JSON.stringify({ jsonrpc: "2.0", id: "files-plus-open", method: "doc.get", params: { name: "herdr-app", ...(on ? { on } : {}) } });
+-  const result = window().platform === "windows"
+-    ? await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", '& { param($request) $request | hc connect }', query])
+-    : await exec("sh", ["-c", 'printf "%s\\n" "$1" | hc connect', "files-plus", query]);
 -  if (result.code !== 0) throw new Error("Cannot check open files");
-+  if (result.code !== 0) throw new Error("无法检查已打开的文件");
-   const reply = result.stdout.split("\n").filter(Boolean).map(line => JSON.parse(line)).find(value => value.id === "files-plus-open");
+-  const reply = result.stdout.split("\n").filter(Boolean).map(line => JSON.parse(line)).find(value => value.id === "files-plus-open");
 -  if (reply?.error || !Array.isArray(reply?.result?.value?.spaces)) throw new Error("Cannot check open files");
-+  if (reply?.error || !Array.isArray(reply?.result?.value?.spaces)) throw new Error("无法检查已打开的文件");
++  const request = JSON.stringify({ jsonrpc: "2.0", id: "files-plus-open", method: "doc.get", params: { name: "herdr-app", ...(on ? { on } : {}) } });
++  // Asked for tidying (reuse the tab that already shows this file), never a reason to
++  // refuse opening: when the app can't answer, open a new tab as usual.
++  const open = await spacesDocument(request).catch(() => null);
++  if (!open) return null;
    const qualify = id => on ? `${on}/${id}` : id;
    const livePanes = new Map(panes().map(pane => [pane.pane, pane]));
    const liveSpaces = spaces();
+   const matches = [];
+-  for (const space of reply.result.value.spaces) {
++  for (const space of open) {
+     const spaceId = qualify(space.id), liveSpace = liveSpaces.find(value => value.id === spaceId);
+     if (!liveSpace) continue;
+     for (const tab of space.tabs || []) {
 --- a/preferences.js
 +++ b/preferences.js
 @@ -1,8 +1,8 @@
@@ -528,25 +590,55 @@
          });
        }
      }
-@@ -273,7 +337,7 @@
-         if (!this.current(context) || this.openRequest !== request) return;
-         if (existing) { focusOpenFile(existing); return; }
-         if (destination === "pane" && !pane) {
+@@ -265,22 +329,26 @@
+   openFile(path, root, cx) {
+     this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
+     const request = this.openRequest = {};
+-    const stack = props()?.previewStack, context = this.context, space = this.spaceId, on = this.on;
++    const stack = props()?.previewStack, space = this.spaceId, on = this.on;
+     const destination = openLocation(shared(OPEN_LOCATION)), pane = focused()?.pane;
++    // A click must open what it named. Only a newer click, or the panel going away,
++    // cancels it: opening the first file moves focus to the new tab, and a location
++    // key that shifts with focus would otherwise drop every click after the first.
++    const superseded = () => this.closed || this.openRequest !== request;
+     cx.spawn(async cx => {
++      const existing = await findOpenFile(path, on, space).catch(() => null);
++      if (superseded()) return;
++      if (existing) { focusOpenFile(existing); return; }
++      if (destination === "pane" && !pane) {
++        notify({ title: "请先在中间区域选择一个分屏", level: "info" });
++        return;
++      }
++      const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
++      if (superseded()) return;
+       try {
+-        const existing = await findOpenFile(path, on, space);
+-        if (!this.current(context) || this.openRequest !== request) return;
+-        if (existing) { focusOpenFile(existing); return; }
+-        if (destination === "pane" && !pane) {
 -          notify({ title: "Select a center pane before opening a file", level: "info" });
-+          notify({ title: "请先在中间区域选择一个分屏", level: "info" });
-           return;
-         }
-         const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
-@@ -288,7 +352,7 @@
+-          return;
+-        }
+-        const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
+-        if (!this.current(context) || this.openRequest !== request) return;
++        const mod = rich ? "preview-plus" : "files-plus";
++        const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
+         if (destination !== "internal") {
+-          const mod = rich ? "preview-plus" : "files-plus";
+-          const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
+           if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
+           else run("pane.split", { pane, direction: "right", mod, props: previewProps });
+         } else if (rich) {
+@@ -288,7 +356,7 @@
            run("layout.select", { stack, child: "preview-plus" });
          } else this.show(path, cx);
        } catch {
 -        if (this.current(context) && this.openRequest === request) notify({ title: "Cannot check open files. Try again.", level: "error" });
-+        if (this.current(context) && this.openRequest === request) notify({ title: "无法检查已打开的文件，请重试。", level: "error" });
++        if (!superseded()) notify({ title: "无法打开文件，请重试。", level: "error" });
        }
        cx.notify();
      });
-@@ -310,12 +374,12 @@
+@@ -310,12 +378,12 @@
          if (text === null || text.includes("\0")) {
            changed = Boolean(this.code);
            this.code?.release(); this.code = null;
@@ -562,7 +654,7 @@
        finally { if (changed && this.previewRequest === request && this.current(context)) cx.notify(); }
      });
    }
-@@ -340,7 +404,7 @@
+@@ -340,7 +408,7 @@
      return v_flex().id("file-viewer").size_full().min_w(0).min_h(0).bg(t.background).text_color(t.foreground).font_family(font).text_size(13)
        .child(div().h(42).px(14).flex().items_center().flex_none().border_b(0.5).border_color(t.border)
          .child(div().truncate().tooltip(this.file).font_semibold().child(basename(this.file))))
@@ -571,7 +663,7 @@
    }
    target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
    menu(path, kind, root, event, cx) {
-@@ -382,7 +446,7 @@
+@@ -382,7 +450,7 @@
      if (lookChanged || chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this, look });
      this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
    }
@@ -580,7 +672,7 @@
    scheduleFit(cx, cause = "background") {
      const fit = props()?.fit;
      if (!fit?.node || this.file) return;
-@@ -446,11 +510,11 @@
+@@ -446,11 +514,11 @@
        .on_mouse_move((event, cx) => dragMove(this, event, cx))
        .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
        .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
@@ -594,7 +686,7 @@
            .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
              if (!add) return;
              const root = entry?.folders[0]?.path || this.root;
-@@ -459,7 +523,7 @@
+@@ -459,7 +527,7 @@
              cx.stop_propagation();
            }).child(svg("mods/files-plus/plus.svg").size(14)))
          .when(Boolean(this.file), el => el.child(div().max_w(140).truncate().text_size(12).text_color(t.dim).tooltip(this.file).child(title)))
@@ -603,7 +695,7 @@
            .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
            .on_click((_event, cx) => {
              cx.stop_propagation();
-@@ -469,7 +533,7 @@
+@@ -469,7 +537,7 @@
        .when(!this.file, el => el.child(this.treeView))
        .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
          .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
