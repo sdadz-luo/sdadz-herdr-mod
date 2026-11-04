@@ -1,22 +1,21 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Editor, EditorState, Input, InputState } from "gpui-base";
-import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
+import { props, shared, spaces, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
 import { target, dirname, basename, extension, kind, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { loadMedia, openFile } from "./media.js";
 import { stageMarkdown } from "./markdown.js";
-import { Tree } from "./tree.js";
 
 const TEXT_LIMIT = 400000;
 const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 
+// files-plus owns the file tree; this panel only shows what it hands over: a file
+// prop (a tab or split) or the shared target of the paired stack.
 function context() {
   const p = props() || {}, f = focused(), space = spaces().find(s => s.id === f?.space) || spaces().find(s => s.active);
-  const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   if (p.file !== undefined) return { mode: "pane", spaceId: space?.id || null, target: target(p) };
   if (p.previewStack) return { mode: "paired", stack: p.previewStack, spaceId: space?.id || null, target: target(shared("preview-plus.target")?.[space?.id]) };
-  const on = f?.pane === null && f?.terminal ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine || null;
-  return { mode: "files", spaceId: space?.id || null, cwd: pane?.cwd || f?.cwd || space?.folder || null, on };
+  return { mode: "none", spaceId: space?.id || null, target: null };
 }
 const contextKey = () => JSON.stringify(context());
 
@@ -76,8 +75,6 @@ export default class PreviewPlus extends View {
         else if (command === "previous") this.turnPage(-1, cx);
       }
     });
-    // Only remote directory listings need a bounded refresh timer; live app data does not.
-    cx.timer.every(10000, cx => { if (this.tree?.location.on && !this.selected) this.tree.refresh(cx); });
   }
 
   sync(cx) {
@@ -85,12 +82,8 @@ export default class PreviewPlus extends View {
     if (this.owner?.key === key) return;
     this.owner = { ...next, key }; this.request = null; this.releaseEditor(); this.document = null;
     this.history = []; this.selected = null; this.media = null; this.text = null; this.error = null; this.actionError = null;
-    this.watchTargets([], cx); this.tree = null;
-    if (next.mode === "files") {
-      const owner = this.owner;
-      this.tree = new Tree(next, () => !this.closed && this.owner === owner && contextKey() === owner.key);
-      this.tree.refresh(cx); this.tree.watch(cx);
-    } else if (next.target) this.show(next.target, cx, false, false);
+    this.watchTargets([], cx);
+    if (next.target) this.show(next.target, cx, false, false);
   }
 
   current(request) {
@@ -268,7 +261,7 @@ export default class PreviewPlus extends View {
         return;
       }
       if (this.loading) this.reloadPending = true; else this.load(cx);
-    } else this.tree?.refresh(cx);
+    }
   }
 
   watchTargets(files, cx) {
@@ -318,10 +311,6 @@ export default class PreviewPlus extends View {
       this.selected = previous.target; this.source = previous.source; this.zoom = previous.zoom; this.page = previous.page; this.total = 0;
       this.load(cx);
     } else if (this.owner.mode === "paired") run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" });
-    else if (this.owner.mode === "files") {
-      this.selected = null; this.request = null; this.releaseEditor(); this.document = null; this.media = null; this.error = null; this.actionError = null;
-      this.watchTargets([], cx); this.tree?.refresh(cx); cx.notify();
-    }
   }
 
   fitScale() {
@@ -436,9 +425,8 @@ export default class PreviewPlus extends View {
           .when(this.dirty(), el => el.child(button("preview-discard", this.confirmDiscard ? "确认放弃" : "放弃修改", colors, cx => this.discard(cx), !this.document.saving, this.confirmDiscard, this.confirmDiscard ? "check" : "undo")))
           .when(Boolean(this.confirmDiscard), el => el.child(button("preview-cancel-discard", "取消放弃", colors, cx => { this.confirmDiscard = false; cx.notify(); })))
           .child(button("preview-save", this.document.saving ? "正在保存…" : `保存 (${window()?.platform === "macos" ? "⌘S" : "Ctrl+S"})`, colors, cx => this.save(cx), this.dirty() && !this.document.saving)))
-        .when(Boolean(file), el => el.child(button("preview-open", "打开", colors, cx => this.open(cx), !this.selected.on)))
-        .when(!file, el => el.child(button("preview-refresh", "刷新", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
-      .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
+        .when(Boolean(file), el => el.child(button("preview-open", "打开", colors, cx => this.open(cx), !this.selected.on))))
+      .when(Boolean(file), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(dirname(file))))
       .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child("文件已在磁盘上变化。草稿已保留，保存时会检查冲突。")))
       .when(Boolean(this.document?.saveError || this.draftError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.document?.saveError || this.draftError)))
       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
@@ -457,8 +445,7 @@ export default class PreviewPlus extends View {
           .child(button("preview-next", "下一页", colors, cx => this.turnPage(1, cx), !this.loading && this.page < this.total)))))
       .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.actionError)))
       .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(this.selected?.on ? "仅本地文件可内嵌图片。" : "部分内嵌图片无法加载。")))
-      .when(!file && Boolean(this.tree), el => el.child(this.tree.render(colors, (value, cx) => this.show(value, cx))))
-      .when(!file && !this.tree, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "请传入绝对文件路径。" : "请在 Files Plus 中选择文件。")))
+      .when(!file, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "请传入绝对文件路径。" : "请在 Files Plus 中选择文件。")))
       .when(Boolean(file), el => el.child(this.body(type, colors)));
   }
 
