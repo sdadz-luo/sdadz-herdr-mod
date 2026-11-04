@@ -11,7 +11,7 @@ import io
 import os
 import sys
 
-SKIP = {"RECIPE.md", "preview.png", "gpui-kit.d.ts", "jsconfig.json"}
+SKIP = {"RECIPE.md", "preview.png", "gpui-kit.d.ts", "jsconfig.json", "README.md", "AGENTS.md"}
 
 
 def files(base):

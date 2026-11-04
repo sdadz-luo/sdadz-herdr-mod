@@ -3,6 +3,8 @@
 本工作区是 **Herdr 第三方 mod 的源码与备份仓库**，不是 Herdr 的运行目录。
 Herdr 只从 app home 加载 mod，因此这里的改动必须复制过去才会生效。
 
+每个 mod 的功能、本地修改和注意事项，见该 mod 目录下的 `README.md`。
+
 ## 两个位置
 
 | 用途 | 路径 |
@@ -20,11 +22,7 @@ Herdr 只从 app home 加载 mod，因此这里的改动必须复制过去才会
 
 ```text
 herdr-mods/
-├── mods/
-│   ├── files-plus/      本地修改：汉化 + Windows 中文文件名修复
-│   ├── preview-plus/    本地修改：同上
-│   ├── git-changes/     本地修改：整体汉化
-│   └── tabs-graph/      克隆自带 tabs，加 Files/Changes 按钮
+├── mods/<name>/         各 mod 源码，功能与本地修改见其中的 README.md
 ├── patches/             本地修改相对上游的补丁
 ├── scripts/mkpatch.py   从上游副本生成本地补丁
 └── AGENTS.md
@@ -33,18 +31,16 @@ herdr-mods/
 `gpui-kit.d.ts`、`jsconfig.json` 由 Herdr 生成，`.tmp/` 是临时克隆，
 三者都不入库（见 `.gitignore`）。
 
-## 已装 mod 与状态
+## 已装 mod
 
-| mod | 上游 | 状态 |
+| mod | 上游 | 说明 |
 | --- | --- | --- |
-| files-plus | `linziyanleo/herdr-mods` | 本地汉化 + 目录列举优化，有补丁 |
-| preview-plus | `linziyanleo/herdr-mods` | 本地汉化，有补丁 |
-| git-changes | `aBER0724/herdr-git-changes` | 本地汉化，有补丁 |
-| tabs-graph | 无（克隆 Herdr 自带 `tabs`） | 本地修改，无补丁 |
+| files-plus | `linziyanleo/herdr-mods` | `mods/files-plus/README.md` |
+| preview-plus | `linziyanleo/herdr-mods` | `mods/preview-plus/README.md` |
+| git-changes | `aBER0724/herdr-git-changes` | `mods/git-changes/README.md` |
+| tabs-graph | 无（克隆 Herdr 自带 `tabs`） | `mods/tabs-graph/README.md` |
 
-已被替代并删除：`git-graph`（提交图面板），其功能由 git-changes 的
-History 页覆盖。git-changes 的 `lanes.js` 虽源自 git-graph，但已自带，
-不依赖 git-graph 安装。
+`git-graph` 已删除，功能并入 git-changes 的 History 页。
 
 ## 安装或更新一个 mod
 
@@ -74,22 +70,6 @@ python scripts/mkpatch.py <上游 mod 目录> mods/<name> patches/<name>-local.p
 ```
 
 补丁冲突时手动合并，再用同一脚本重新生成，不要手改补丁。
-
-## files-plus 的目录读取
-
-Windows 上列目录是启动进程，原实现每次用 PowerShell（约 350ms），展开多层
-会逐层等待。现在改为：
-
-- 本地 Windows 用 `node -e` 一次读取目标目录和最多 8 个子目录（约 70ms），
-  结果存 10 秒缓存；展开命中缓存时直接渲染。
-- 展开后后台预取下一层；同一目录的并发请求共用一次读取。
-- node 不可用或读取失败时回退 PowerShell 单目录读取；远端机器仍用 `sh`
-  并轮询，不走缓存。
-- 路径始终作为 `node` 的独立参数传入，不拼进命令字符串。
-
-改动集中在 `workspace.js` 的 `directory()` / `directoryTree()` /
-`localTree()` / `prefetch()` 与 `loadFolder()`。上游更新后补丁可能冲突，
-按补丁流程重新生成。
 
 ## 汉化约定
 
