@@ -1,6 +1,7 @@
 # herdr-mods：Herdr 第三方 mod 仓库
 
 Herdr 只从 app home 加载 mod，所以这里保存源码与备份，装好后复制过去。
+不保留上游仓库副本；需要更新时临时 clone，用完删掉。
 
 ## 两个位置
 
@@ -16,8 +17,6 @@ Herdr 只从 app home 加载 mod，所以这里保存源码与备份，装好后
 3. 跑 `herdr-app check`。
 4. 在这里提交一次。
 
-仓库里的 `mods\<name>\` 与 app home 的内容保持一致；升级上游时先改这里，再复制过去。
-
 ## 目录
 
 ```text
@@ -27,9 +26,6 @@ herdr-mods/
 │   ├── preview-plus/    本地修改：同上
 │   ├── git-graph/       上游原样，未改
 │   └── tabs-graph/      克隆自带 tabs，加了 Git 按钮
-├── upstream/
-│   ├── linziyanleo-herdr-mods/     files-plus、preview-plus 的上游
-│   └── rabeeh-ta-herdr-git-graph/  git-graph 的上游
 └── patches/
     ├── files-plus-local.patch
     └── preview-plus-local.patch
@@ -40,29 +36,35 @@ herdr-mods/
 
 ## 更新上游
 
+补丁基于 `linziyanleo/herdr-mods` 的 `92cef9f`（2026-11-04）。
+上游变了就临时 clone，覆盖后再应用补丁：
+
 ```sh
-git -C upstream/linziyanleo-herdr-mods pull
+git clone --depth 1 https://github.com/linziyanleo/herdr-mods.git .tmp/herdr-mods
 
-# 用上游新文件覆盖本地版
-cp -a upstream/linziyanleo-herdr-mods/files-plus/mods/files-plus/. mods/files-plus/
-cp -a upstream/linziyanleo-herdr-mods/preview-plus/mods/preview-plus/. mods/preview-plus/
+cp -a .tmp/herdr-mods/files-plus/mods/files-plus/. mods/files-plus/
+cp -a .tmp/herdr-mods/preview-plus/mods/preview-plus/. mods/preview-plus/
 
-# 重放本地改动
 (cd mods/files-plus && git apply ../../patches/files-plus-local.patch)
 (cd mods/preview-plus && git apply ../../patches/preview-plus-local.patch)
+
+rm -rf .tmp
 ```
 
 git-graph 没有本地改动，直接覆盖：
 
 ```sh
-git -C upstream/rabeeh-ta-herdr-git-graph pull
-cp -a upstream/rabeeh-ta-herdr-git-graph/mods/git-graph/. mods/git-graph/
+git clone --depth 1 https://github.com/rabeeh-ta/herdr-git-graph.git .tmp/git-graph
+cp -a .tmp/git-graph/mods/git-graph/. mods/git-graph/
+rm -rf .tmp
 ```
 
-补丁冲突时手动合并，然后重新生成：
+补丁冲突时按 `git apply` 的提示手动合并，然后重新生成：
 
 ```sh
-git diff --no-index upstream/linziyanleo-herdr-mods/files-plus/mods/files-plus mods/files-plus > patches/files-plus-local.patch
+git clone --depth 1 https://github.com/linziyanleo/herdr-mods.git .tmp/herdr-mods
+diff -ru .tmp/herdr-mods/files-plus/mods/files-plus mods/files-plus > patches/files-plus-local.patch
+rm -rf .tmp
 ```
 
 ## 复制到 Herdr
