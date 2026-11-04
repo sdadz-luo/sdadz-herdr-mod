@@ -1,0 +1,648 @@
+--- a/diff.js
++++ b/diff.js
+@@ -21,15 +21,15 @@
+ import { icon } from "./menu.js";
+ 
+ const MAX = 5000;
+-const clip = (line) => (line.length > 4000 ? line.slice(0, 4000) + "… (line truncated)" : line);
++const clip = (line) => (line.length > 4000 ? line.slice(0, 4000) + "…（行已截断）" : line);
+ const ROW = 20, HEAD = 24;
+ const mono = () => settings().font_family ?? "JetBrains Mono";
+ 
+ async function untrackedLines(root, on, path) {
+   const text = await readTextFile(`${root}/${path}`, { on }).catch(() => null);
+-  if (text === null) return ["Cannot preview this file (binary, too large, or unreadable)"];
+-  if (text.includes("\0")) return ["Binary file · no text diff"];
+-  if (!text) return ["Empty new file"];
++  if (text === null) return ["无法预览此文件（二进制、过大或不可读）"];
++  if (text.includes("\0")) return ["二进制文件 · 无文本差异"];
++  if (!text) return ["空的新文件"];
+   const n = G.countLines(text);
+   return [`@@ -0,0 +1,${n} @@`, ...text.slice(0, 400000).replace(/\n$/, "").split("\n").slice(0, 3000).map((l) => `+${l}`)];
+ }
+@@ -47,14 +47,14 @@
+     for (const path of untracked.slice(0, 50)) lines.push(`diff --git a/${path} b/${path}`, ...(await untrackedLines(root, on, path)));
+   }
+   if (item.area === "file" && !lines.some((l) => l.startsWith("@@") || l.startsWith("Binary") || /^[-+ ]?Subproject/.test(l)))
+-    lines = [item.submodule ? `Submodule: ${item.submodule}` : item.binary ? "Binary file changed" : "No text diff available"];
+-  if (!lines.length) lines = ["No changes"];
++    lines = [item.submodule ? `子模块：${item.submodule}` : item.binary ? "二进制文件已更改" : "无文本差异"];
++  if (!lines.length) lines = ["无更改"];
+   return lines.slice(0, MAX).map(clip);
+ }
+ 
+-export const itemTitle = (item) => item.area === "all" ? "All changes" : item.area === "stash" ? `${item.ref} · ${item.subject}`
++export const itemTitle = (item) => item.area === "all" ? "全部更改" : item.area === "stash" ? `${item.ref} · ${item.subject}`
+   : item.area === "commit" ? `${item.short} · ${item.subject}` : item.path;
+-export const itemName = (item) => item.area === "all" ? "All changes" : item.area === "stash" ? item.ref
++export const itemName = (item) => item.area === "all" ? "全部更改" : item.area === "stash" ? item.ref
+   : item.area === "commit" ? item.short : item.path.split("/").pop();
+ export const getLayout = () => (shared("git-changes.layout") === "split" ? "split" : "unified");
+ export const setLayout = (layout) => setShared("git-changes.layout", layout);
+@@ -156,14 +156,14 @@
+       .on_click((_e, cx) => { setLayout(id); cx.notify(); })
+       .child(svg(icon(name)).size(13));
+     return h_flex().p(2).gap(2).flex_none().rounded(7).border_1().border_color(t.border)
+-      .child(cell("unified", "rows", "One column", layout === "unified"))
+-      .child(cell("split", "columns", "Two columns: before | after", layout === "split"));
++      .child(cell("unified", "rows", "单栏", layout === "unified"))
++      .child(cell("split", "columns", "双栏：修改前 | 修改后", layout === "split"));
+   }
+ 
+   header(t, layout) {
+     const add = this.rows.filter((r) => r.kind === "+").length, del = this.rows.filter((r) => r.kind === "-").length;
+-    const what = this.item.area === "commit" ? `Commit ${this.item.short} · ${this.item.author} · ${this.item.when}`
+-      : this.item.area === "stash" ? `Stash ${this.item.ref}` : "Working tree and index against HEAD";
++    const what = this.item.area === "commit" ? `提交 ${this.item.short} · ${this.item.author} · ${this.item.when}`
++      : this.item.area === "stash" ? `贮藏 ${this.item.ref}` : "工作区与索引对比 HEAD";
+     return v_flex().flex_none().border_b(1).border_color(t.border)
+       .child(h_flex().h(38).px(12).gap(8).items_center()
+         .child(svg(icon(this.item.area === "commit" ? "commit" : this.item.area === "stash" ? "stash" : "file")).size(14).flex_none().text_color(t.muted))
+@@ -171,13 +171,13 @@
+         .when(add > 0, (e) => e.child(div().text_size(11.5).text_color(t.ansi2).child(`+${add}`)))
+         .when(del > 0, (e) => e.child(div().text_size(11.5).text_color(t.ansi1).child(`−${del}`)))
+         .child(this.toggle(t, layout))
+-        .child(h_flex().id("gc-diff-close").size(24).items_center().justify_center().rounded(5).cursor_pointer().text_color(t.muted).tooltip("Close")
++        .child(h_flex().id("gc-diff-close").size(24).items_center().justify_center().rounded(5).cursor_pointer().text_color(t.muted).tooltip("关闭")
+           .hover((s) => s.bg(t.hover).text_color(t.foreground))
+           .on_click(() => { const tab = this.entry()?.tab; if (tab) run("tab.close", { id: tab }); })
+           .child(svg(icon("x")).size(13))))
+       .child(h_flex().h(22).px(12).gap(8).items_center().text_size(11).text_color(t.dim)
+         .child(div().flex_1().min_w(0).truncate().child(`${what} · ${this.root}`))
+-        .child(div().child(this.loading ? "Loading…" : "")));
++        .child(div().child(this.loading ? "加载中…" : "")));
+   }
+ 
+   unifiedRow({ kind, old, number, text }, t) {
+@@ -211,7 +211,7 @@
+     this.sync(cx);
+     const t = theme(), layout = getLayout();
+     const root = v_flex().id("git-changes-diff").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(12.5);
+-    if (!this.item) return root.child(div().p(16).text_color(t.dim).child("Pick a file in Changes to see its diff here."));
++    if (!this.item) return root.child(div().p(16).text_color(t.dim).child("在“更改”里选择一个文件，即可在此查看差异。"));
+     if (layout === "split" && !this.pairs) this.pairs = G.splitRows(this.rows);
+     const rows = layout === "split" ? this.pairs : this.rows;
+     const heights = rows.map((r) => (r.kind === "f" ? HEAD : ROW));
+@@ -232,7 +232,7 @@
+       .child(Scrollbar.vertical(`${this.listId}-${layout}`).viewport_from_layout().absolute().inset_0());
+     return root.child(this.header(t, layout))
+       .when(layout === "split", (e) => e.child(h_flex().h(22).flex_none().items_center().border_b(1).border_color(t.border).text_size(11).text_color(t.muted)
+-        .child(div().flex_1().px(12).child("Before")).child(div().flex_1().px(12).border_l(1).border_color(t.border).child("After"))))
++        .child(div().flex_1().px(12).child("修改前")).child(div().flex_1().px(12).border_l(1).border_color(t.border).child("修改后"))))
+       .when(Boolean(this.error), (e) => e.child(div().px(12).py(8).text_color(t.ansi1).child(this.error)))
+       .child(body);
+   }
+--- a/git.js
++++ b/git.js
+@@ -52,11 +52,11 @@
+     if (kind === "2") i++; // a rename's original path (only without --no-renames)
+     const [x, y] = parts[1];
+     // A submodule's state is "S<commit><modified><untracked>", e.g. "S..U".
+-    const sub = parts[2][0] === "S" ? [parts[2][1] === "C" && "new commits", parts[2][2] === "M" && "modified content", parts[2][3] === "U" && "untracked content"].filter(Boolean) : null;
++    const sub = parts[2][0] === "S" ? [parts[2][1] === "C" && "新提交", parts[2][2] === "M" && "内容已修改", parts[2][3] === "U" && "未跟踪内容"].filter(Boolean) : null;
+     entries.push({
+       path, status: letter(x === "A" || y === "." ? x : y),
+       staged: x === "." ? "none" : y === "." ? "all" : "some",
+-      ...(sub ? { submodule: sub.join(", ") || "changed" } : {}),
++      ...(sub ? { submodule: sub.join("、") || "已更改" } : {}),
+     });
+   }
+   return { branch, entries };
+@@ -103,15 +103,15 @@
+   });
+ }
+ 
+-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
++const MONTHS = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+ export function ago(seconds) {
+   const s = Date.now() / 1000 - seconds;
+-  if (s < 60) return "now";
+-  if (s < 3600) return `${Math.round(s / 60)}m`;
+-  if (s < 86400) return `${Math.round(s / 3600)}h`;
+-  if (s < 86400 * 30) return `${Math.round(s / 86400)}d`;
++  if (s < 60) return "刚刚";
++  if (s < 3600) return `${Math.round(s / 60)}分`;
++  if (s < 86400) return `${Math.round(s / 3600)}时`;
++  if (s < 86400 * 30) return `${Math.round(s / 86400)}天`;
+   const d = new Date(seconds * 1000);
+-  return d.getFullYear() === new Date().getFullYear() ? `${MONTHS[d.getMonth()]} ${d.getDate()}` : `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
++  return d.getFullYear() === new Date().getFullYear() ? `${MONTHS[d.getMonth()]}${d.getDate()}日` : `${d.getFullYear()}年${MONTHS[d.getMonth()]}`;
+ }
+ 
+ // The labels a row shows: what's checked out first; a remote branch with the same
+@@ -136,7 +136,7 @@
+ export function withUncommitted(commits, changes, head) {
+   if (!changes) return commits;
+   return [{ hash: UNCOMMITTED, uncommitted: true, dashed: true, parents: head ? [head] : [], refs: [], head: false,
+-    subject: `Uncommitted changes (${changes})`, author: "", time: null, when: "" }, ...commits];
++    subject: `未提交的更改 (${changes})`, author: "", time: null, when: "" }, ...commits];
+ }
+ 
+ export const countLines = (text) => (text ? text.split("\n").length - Number(text.endsWith("\n")) : 0);
+@@ -156,7 +156,7 @@
+     const hunk = /^@@+ -(\d+)(?:,\d+)?(?: -\d+(?:,\d+)?)* \+(\d+)/.exec(line);
+     if (hunk) { old = +hunk[1]; next = +hunk[2]; header = false; rows.push({ kind: "@", text: line }); continue; }
+     if (header) {
+-      if (line.startsWith("Binary files")) rows.push({ kind: "", text: "Binary file changed" });
++      if (line.startsWith("Binary files")) rows.push({ kind: "", text: "二进制文件已更改" });
+       else if (line.startsWith("Subproject commit") || line.startsWith("-Subproject") || line.startsWith("+Subproject")) rows.push({ kind: line[0] === "-" ? "-" : line[0] === "+" ? "+" : "", text: line.replace(/^[-+]/, "") });
+       continue;
+     }
+@@ -181,7 +181,7 @@
+ export function suggestMessage(entries) {
+   if (entries.length !== 1) return "";
+   const e = entries[0], name = e.path.split("/").pop();
+-  return `${e.status === "A" ? "Create" : e.status === "D" ? "Delete" : "Update"} ${name}`;
++  return `${e.status === "A" ? "新建" : e.status === "D" ? "删除" : "更新"} ${name}`;
+ }
+ 
+ // --- what the buttons run ---------------------------------------------------
+@@ -212,34 +212,34 @@
+ 
+ export function commitArgs({ message, amend, signoff, mode }) {
+   const text = message.trim();
+-  if (mode === "conflict") return { error: "Resolve the merge conflicts first (stage each file when it's fixed)" };
+-  if (!text && !amend) return { error: "Write a commit message" };
+-  if (!amend && mode === "none") return { error: "Nothing staged or tracked to commit: stage the files first" };
++  if (mode === "conflict") return { error: "请先解决合并冲突（每解决一个文件就暂存它）" };
++  if (!text && !amend) return { error: "请输入提交信息" };
++  if (!amend && mode === "none") return { error: "没有暂存或已跟踪的更改可提交：请先暂存文件" };
+   return { cmds: [["commit", ...(mode === "tracked" ? ["-a"] : []), ...(amend ? ["--amend"] : []), ...(signoff ? ["--signoff"] : []), ...(text ? ["-m", text] : ["--no-edit"])]] };
+ }
+ 
+ // Pushes to the upstream; a branch without one is published to origin (or the only remote).
+ export function pushArgs(branch, remotes, { force } = {}) {
+-  if (branch.detached || !branch.head) return { error: "Check out a branch to push" };
++  if (branch.detached || !branch.head) return { error: "请先切换到一个分支再推送" };
+   const lease = force ? ["--force-with-lease"] : [];
+   if (branch.upstream) return { cmds: [["push", ...lease]] };
+   const remote = remotes.includes("origin") ? "origin" : remotes[0];
+-  if (!remote) return { error: "This repository has no remote" };
++  if (!remote) return { error: "此仓库没有远程" };
+   return { cmds: [["push", ...lease, "--set-upstream", remote, branch.head]], remote };
+ }
+ 
+ export function pullArgs(branch, { rebase } = {}) {
+-  if (!branch.upstream) return { error: "This branch has no upstream to pull from" };
++  if (!branch.upstream) return { error: "此分支没有可拉取的上游" };
+   return { cmds: [["pull", rebase ? "--rebase" : "--ff-only"]] };
+ }
+ 
+ // The main remote button, as Zed picks it: pull when behind, push when ahead, publish a new branch, else fetch.
+ export function remoteAction(branch, remotes, hasHead) {
+   if (!branch || !remotes.length) return null;
+-  if (branch.upstream && branch.behind > 0) return { type: "pull", label: "Pull", count: `↓${branch.behind}` };
+-  if (branch.upstream && branch.ahead > 0) return { type: "push", label: "Push", count: `↑${branch.ahead}` };
+-  if (!branch.upstream && !branch.detached && hasHead) return { type: "push", label: "Publish" };
+-  return { type: "fetch", label: "Fetch" };
++  if (branch.upstream && branch.behind > 0) return { type: "pull", label: "拉取", count: `↓${branch.behind}` };
++  if (branch.upstream && branch.ahead > 0) return { type: "push", label: "推送", count: `↑${branch.ahead}` };
++  if (!branch.upstream && !branch.detached && hasHead) return { type: "push", label: "发布" };
++  return { type: "fetch", label: "获取" };
+ }
+ 
+ export const fetchArgs = () => [["fetch", "--prune"]];
+@@ -256,7 +256,7 @@
+ // Git's own words, without its hints.
+ export function gitError(result) {
+   const lines = (result.stderr || result.stdout || "").split("\n").map((l) => l.trimEnd()).filter((l) => l && !l.startsWith("hint:"));
+-  return lines.slice(-6).join("\n") || `git exited with ${result.code}`;
++  return lines.slice(-6).join("\n") || `git 退出码 ${result.code}`;
+ }
+ 
+ // --- list and diff shapes -----------------------------------------------------
+--- a/history.js
++++ b/history.js
+@@ -141,7 +141,7 @@
+           return Array.from({ length: range.end - range.start }, (_x, k) => range.start + k).map((i) => i < this.commits.length
+             ? this.row(i, t, colors, mono, geo, textWidth, selected)
+             : div().id("history-more").h(this.rowH()).flex_none().px(12).flex().items_center().text_color(t.accent).hover((s) => s.bg(t.hover))
+-              .child(loading ? "Loading more commits…" : `Load ${PAGE} more commits`));
++              .child(loading ? "正在加载更多提交…" : `再加载 ${PAGE} 个提交`));
+         })
+         .on_item_click((key, cx) => {
+           const clicks = this.clicks ?? 1; this.clicks = 0;
+--- a/menu.js
++++ b/menu.js
+@@ -25,7 +25,7 @@
+     if (!it || it.separator || it.disabled) return;
+     if (it.copy !== undefined) {
+       cx.write_to_clipboard(it.copy);
+-      notify({ title: "Copied", body: it.copy, level: "success", timeout: 2000 });
++      notify({ title: "已复制", body: it.copy, level: "success", timeout: 2000 });
+     } else if (it.danger && this.confirming !== i) {
+       this.confirming = i; this.at = i; cx.notify(); return;
+     } else setShared("git-changes.pick", { owner, id: it.id, at: Date.now() });
+@@ -62,7 +62,7 @@
+           .child(it.check !== undefined
+             ? div().w(14).flex_none().text_color(t.accent).child(it.check ? "✓" : "")
+             : svg(icon(it.icon ?? "commit")).size(14).flex_none().text_color(it.disabled ? t.dim : it.danger ? t.ansi1 : t.muted))
+-          .child(div().flex_1().min_w(0).truncate().child(confirm ? `Click again: ${it.label}` : it.label))
++          .child(div().flex_1().min_w(0).truncate().child(confirm ? `再次点击：${it.label}` : it.label))
+           .when(Boolean(it.hint), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(it.hint)));
+       }));
+   }
+--- a/panel.js
++++ b/panel.js
+@@ -101,7 +101,7 @@
+       try {
+         const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on });
+         if (key() !== context) return;
+-        if (top.code !== 0) { this.reset(); this.error = "Not a git repository"; return; }
++        if (top.code !== 0) { this.reset(); this.error = "不是 Git 仓库"; return; }
+         const root = top.stdout.trim(), git = (args) => exec("git", [...G.READ, ...args], { cwd: root, on });
+         const status = await git(G.STATUS);
+         if (status.code !== 0) throw new Error(G.gitError(status));
+@@ -168,8 +168,8 @@
+         if (done) notify({ title: done, level: "success", timeout: 3000 });
+       } catch (e) {
+         const message = String(e?.message ?? e);
+-        if (key() === context) this.note = `${what} failed: ${message}`;
+-        if (remote) notify({ title: `${what} failed`, body: message, level: "error" });
++        if (key() === context) this.note = `${what}失败：${message}`;
++        if (remote) notify({ title: `${what}失败`, body: message, level: "error" });
+       } finally {
+         this.busy = null;
+         setShared("git-graph.changed", Date.now());
+@@ -196,32 +196,32 @@
+       if (p.error) return this.fail(cx, p.error);
+       cmds = [...cmds, ...p.cmds];
+     }
+-    const label = this.amend ? "Amend" : "Commit";
+-    this.act(cx, push ? `${label} & push` : label, cmds, { remote: push, done: push ? `Committed and pushed ${this.branch.head}` : null, after: () => this.clearMessage() });
++    const label = this.amend ? "修补" : "提交";
++    this.act(cx, push ? `${label}并推送` : label, cmds, { remote: push, done: push ? `已提交并推送 ${this.branch.head}` : null, after: () => this.clearMessage() });
+   }
+ 
+   remote(cx, type, opts = {}) {
+     const b = this.branch ?? {};
+-    if (type === "fetch") return this.act(cx, "Fetch", G.fetchArgs(), { remote: true, done: "Fetched" });
++    if (type === "fetch") return this.act(cx, "获取", G.fetchArgs(), { remote: true, done: "已获取" });
+     if (type === "pull") {
+       const p = G.pullArgs(b, opts);
+       if (p.error) return this.fail(cx, p.error);
+-      return this.act(cx, "Pull", p.cmds, { remote: true, done: `Pulled ${b.upstream}` });
++      return this.act(cx, "拉取", p.cmds, { remote: true, done: `已拉取 ${b.upstream}` });
+     }
+     const p = G.pushArgs(b, this.remotes, opts);
+     if (p.error) return this.fail(cx, p.error);
+-    this.act(cx, opts.force ? "Force push" : "Push", p.cmds, { remote: true, done: `Pushed ${b.head}${p.remote ? ` to ${p.remote}` : ""}` });
++    this.act(cx, opts.force ? "强制推送" : "推送", p.cmds, { remote: true, done: `已推送 ${b.head}${p.remote ? ` 到 ${p.remote}` : ""}` });
+   }
+ 
+   stash(cx, staged) {
+-    if (staged ? !this.entries.some((e) => e.staged !== "none") : !this.entries.length) return this.fail(cx, staged ? "Nothing staged to stash" : "Nothing to stash");
+-    this.act(cx, "Stash", G.stashPushArgs(this.message, { staged }), { after: () => this.clearMessage() });
++    if (staged ? !this.entries.some((e) => e.staged !== "none") : !this.entries.length) return this.fail(cx, staged ? "没有可贮藏的暂存内容" : "没有可贮藏的更改");
++    this.act(cx, "贮藏", G.stashPushArgs(this.message, { staged }), { after: () => this.clearMessage() });
+   }
+ 
+   uncommit(cx) {
+     if (!this.last) return;
+     const subject = this.last.subject;
+-    this.act(cx, "Uncommit", G.uncommitArgs(this.last.parents.length > 0), {
++    this.act(cx, "撤销提交", G.uncommitArgs(this.last.parents.length > 0), {
+       after: () => { if (!this.message.trim()) { this.message = subject; this.editor.set_value(subject); } } });
+   }
+ 
+@@ -245,7 +245,7 @@
+     const paths = list.map((e) => e.path);
+     if (!paths.length) return;
+     const all = list.every((e) => e.staged === "all");
+-    this.act(cx, all ? "Unstage" : "Stage", [all ? (this.hasHead ? ["restore", "--staged", "--", ...paths] : ["rm", "--cached", "-q", "-r", "--", ...paths]) : ["add", "-A", "--", ...paths]]);
++    this.act(cx, all ? "取消暂存" : "暂存", [all ? (this.hasHead ? ["restore", "--staged", "--", ...paths] : ["rm", "--cached", "-q", "-r", "--", ...paths]) : ["add", "-A", "--", ...paths]]);
+   }
+ 
+   setListMode(mode, cx) { this.listMode = mode; localStorage.setItem("list", mode); cx.notify(); }
+@@ -289,23 +289,23 @@
+   fileMenu(e, cx) {
+     const staged = e.staged === "all";
+     this.menu([
+-      { label: staged ? "Unstage" : e.conflict ? "Mark resolved" : "Stage", icon: staged ? "minus" : "plus", run: (cx) => this.act(cx, staged ? "Unstage" : "Stage", G.toggleArgs(e, this.hasHead)) },
+-      { label: "Show diff", icon: "diff", run: (cx) => this.pick(e, cx) },
+-      { separator: true },
+-      { label: "Copy path", icon: "copy", copy: e.path },
+-      { label: "Copy full path", icon: "copy", copy: `${this.root}/${e.path}` },
+-      { separator: true },
+-      { label: e.untracked ? "Trash file" : "Discard changes", icon: e.untracked ? "trash" : "undo", danger: true, run: (cx) => this.act(cx, "Discard", G.discardArgs(e, this.hasHead)) },
++      { label: staged ? "取消暂存" : e.conflict ? "标记已解决" : "暂存", icon: staged ? "minus" : "plus", run: (cx) => this.act(cx, staged ? "取消暂存" : "暂存", G.toggleArgs(e, this.hasHead)) },
++      { label: "查看差异", icon: "diff", run: (cx) => this.pick(e, cx) },
++      { separator: true },
++      { label: "复制路径", icon: "copy", copy: e.path },
++      { label: "复制完整路径", icon: "copy", copy: `${this.root}/${e.path}` },
++      { separator: true },
++      { label: e.untracked ? "删除文件" : "丢弃更改", icon: e.untracked ? "trash" : "undo", danger: true, run: (cx) => this.act(cx, "丢弃", G.discardArgs(e, this.hasHead)) },
+     ], cx);
+   }
+ 
+   stashMenu(s, cx) {
+     this.menu([
+-      { label: "Apply", icon: "check", hint: "keep", run: (cx) => this.act(cx, "Apply stash", G.stashArgs("apply", s.ref)) },
+-      { label: "Pop", icon: "fetch", hint: "apply & drop", run: (cx) => this.act(cx, "Pop stash", G.stashArgs("pop", s.ref)) },
+-      { label: "Show diff", icon: "diff", run: (cx) => this.pick(s, cx) },
+-      { separator: true },
+-      { label: "Drop", icon: "trash", danger: true, run: (cx) => this.act(cx, "Drop stash", G.stashArgs("drop", s.ref)) },
++      { label: "应用", icon: "check", hint: "保留贮藏", run: (cx) => this.act(cx, "应用贮藏", G.stashArgs("apply", s.ref)) },
++      { label: "弹出", icon: "fetch", hint: "应用并删除", run: (cx) => this.act(cx, "弹出贮藏", G.stashArgs("pop", s.ref)) },
++      { label: "查看差异", icon: "diff", run: (cx) => this.pick(s, cx) },
++      { separator: true },
++      { label: "删除", icon: "trash", danger: true, run: (cx) => this.act(cx, "删除贮藏", G.stashArgs("drop", s.ref)) },
+     ], cx);
+   }
+ 
+@@ -314,57 +314,57 @@
+     const refs = c.refs ?? [], local = refs.filter((r) => r.kind === "branch" && r.name !== current);
+     const remote = refs.filter((r) => r.kind === "remote" && !refs.some((b) => b.kind === "branch" && r.name.endsWith(`/${b.name}`)));
+     this.menu([
+-      ...local.map((r) => ({ label: `Checkout ${r.name}`, icon: "branch", run: (cx) => this.act(cx, "Checkout", G.checkoutArgs(r.name), { done: `Switched to ${r.name}` }) })),
+-      ...remote.map((r) => ({ label: `Checkout ${r.name}`, icon: "cloud", hint: "track", run: (cx) => this.act(cx, "Checkout", G.checkoutRemoteArgs(r.name), { done: `Tracking ${r.name}` }) })),
+-      !head && { label: "Checkout this commit", icon: "commit", hint: "detached", run: (cx) => this.act(cx, "Checkout", G.detachArgs(c.hash), { done: `Checked out ${c.short}` }) },
+-      { separator: true },
+-      { label: "Show diff", icon: "diff", run: (cx) => this.pick(c, cx) },
+-      { label: "Copy hash", icon: "copy", hint: "⌘C", copy: c.hash },
+-      { label: "Copy short hash", icon: "copy", hint: c.short, copy: c.short },
+-      { label: "Copy message", icon: "copy", copy: c.subject },
+-      { separator: true },
+-      head && { label: "Uncommit", icon: "undo", hint: "keep changes staged", run: (cx) => this.uncommit(cx) },
+-      { label: "Revert commit", icon: "reset", run: (cx) => this.act(cx, "Revert", G.revertArgs(c.hash), { done: `Reverted ${c.short}` }) },
++      ...local.map((r) => ({ label: `切换到 ${r.name}`, icon: "branch", run: (cx) => this.act(cx, "切换", G.checkoutArgs(r.name), { done: `已切换到 ${r.name}` }) })),
++      ...remote.map((r) => ({ label: `切换到 ${r.name}`, icon: "cloud", hint: "跟踪", run: (cx) => this.act(cx, "切换", G.checkoutRemoteArgs(r.name), { done: `正在跟踪 ${r.name}` }) })),
++      !head && { label: "切换到该提交", icon: "commit", hint: "分离 HEAD", run: (cx) => this.act(cx, "切换", G.detachArgs(c.hash), { done: `已切换到 ${c.short}` }) },
++      { separator: true },
++      { label: "查看差异", icon: "diff", run: (cx) => this.pick(c, cx) },
++      { label: "复制哈希", icon: "copy", hint: "Ctrl+Shift+C", copy: c.hash },
++      { label: "复制短哈希", icon: "copy", hint: c.short, copy: c.short },
++      { label: "复制提交信息", icon: "copy", copy: c.subject },
++      { separator: true },
++      head && { label: "撤销提交", icon: "undo", hint: "保留暂存", run: (cx) => this.uncommit(cx) },
++      { label: "还原提交", icon: "reset", run: (cx) => this.act(cx, "还原", G.revertArgs(c.hash), { done: `已还原 ${c.short}` }) },
+     ], cx, 270);
+   }
+ 
+   optionsMenu(cx) {
+     const any = this.entries.length > 0, tracked = this.entries.some((e) => !e.untracked), untracked = this.entries.some((e) => e.untracked);
+     this.menu([
+-      { label: "Stage all", icon: "plus", disabled: !any, run: (cx) => this.act(cx, "Stage", G.stageAllArgs()) },
+-      { label: "Unstage all", icon: "minus", disabled: !this.entries.some((e) => e.staged !== "none"), run: (cx) => this.act(cx, "Unstage", G.unstageAllArgs(this.hasHead)) },
+-      { separator: true },
+-      { label: "Stash all", icon: "stash", disabled: !any, run: (cx) => this.stash(cx, false) },
+-      { label: "Stash staged", icon: "stash", disabled: !this.entries.some((e) => e.staged !== "none"), run: (cx) => this.stash(cx, true) },
+-      { label: "Pop latest stash", icon: "fetch", disabled: !this.stashes.length, run: (cx) => this.act(cx, "Pop stash", G.stashArgs("pop", "stash@{0}")) },
+-      { separator: true },
+-      { label: "Discard tracked changes", icon: "undo", danger: true, disabled: !tracked, run: (cx) => this.act(cx, "Discard", G.discardTrackedArgs(this.hasHead)) },
+-      { label: "Trash untracked files", icon: "trash", danger: true, disabled: !untracked, run: (cx) => this.act(cx, "Trash", G.trashUntrackedArgs()) },
++      { label: "全部暂存", icon: "plus", disabled: !any, run: (cx) => this.act(cx, "暂存", G.stageAllArgs()) },
++      { label: "全部取消暂存", icon: "minus", disabled: !this.entries.some((e) => e.staged !== "none"), run: (cx) => this.act(cx, "取消暂存", G.unstageAllArgs(this.hasHead)) },
++      { separator: true },
++      { label: "贮藏全部", icon: "stash", disabled: !any, run: (cx) => this.stash(cx, false) },
++      { label: "贮藏暂存内容", icon: "stash", disabled: !this.entries.some((e) => e.staged !== "none"), run: (cx) => this.stash(cx, true) },
++      { label: "弹出最新贮藏", icon: "fetch", disabled: !this.stashes.length, run: (cx) => this.act(cx, "弹出贮藏", G.stashArgs("pop", "stash@{0}")) },
++      { separator: true },
++      { label: "丢弃已跟踪更改", icon: "undo", danger: true, disabled: !tracked, run: (cx) => this.act(cx, "丢弃", G.discardTrackedArgs(this.hasHead)) },
++      { label: "删除未跟踪文件", icon: "trash", danger: true, disabled: !untracked, run: (cx) => this.act(cx, "删除", G.trashUntrackedArgs()) },
+     ], cx);
+   }
+ 
+   remoteMenu(cx) {
+     const b = this.branch ?? {}, has = this.remotes.length > 0, onBranch = !b.detached && Boolean(b.head);
+     this.menu([
+-      { label: "Fetch", icon: "refresh", disabled: !has, run: (cx) => this.remote(cx, "fetch") },
+-      { label: "Pull", icon: "fetch", hint: b.behind ? `↓${b.behind}` : "", disabled: !b.upstream, run: (cx) => this.remote(cx, "pull") },
+-      { label: "Pull (rebase)", icon: "fetch", disabled: !b.upstream, run: (cx) => this.remote(cx, "pull", { rebase: true }) },
+-      { separator: true },
+-      { label: b.upstream ? "Push" : "Publish branch", icon: "push", hint: b.ahead ? `↑${b.ahead}` : "", disabled: !has || !onBranch, run: (cx) => this.remote(cx, "push") },
+-      { label: "Force push (with lease)", icon: "push", danger: true, disabled: !has || !onBranch, run: (cx) => this.remote(cx, "push", { force: true }) },
++      { label: "获取", icon: "refresh", disabled: !has, run: (cx) => this.remote(cx, "fetch") },
++      { label: "拉取", icon: "fetch", hint: b.behind ? `↓${b.behind}` : "", disabled: !b.upstream, run: (cx) => this.remote(cx, "pull") },
++      { label: "拉取（变基）", icon: "fetch", disabled: !b.upstream, run: (cx) => this.remote(cx, "pull", { rebase: true }) },
++      { separator: true },
++      { label: b.upstream ? "推送" : "发布分支", icon: "push", hint: b.ahead ? `↑${b.ahead}` : "", disabled: !has || !onBranch, run: (cx) => this.remote(cx, "push") },
++      { label: "强制推送（带租约）", icon: "push", danger: true, disabled: !has || !onBranch, run: (cx) => this.remote(cx, "push", { force: true }) },
+     ], cx);
+   }
+ 
+   commitOptions(cx) {
+     const remote = this.remotes.length > 0 && this.branch && !this.branch.detached;
+     this.menu([
+-      { label: "Amend last commit", check: Boolean(this.amend), disabled: !this.last, run: (cx) => this.toggleAmend(cx) },
+-      { label: "Signoff", check: this.signoff, run: () => { this.signoff = !this.signoff; localStorage.setItem("signoff", this.signoff ? "1" : "0"); } },
+-      { separator: true },
+-      { label: this.amend ? "Amend & push" : "Commit & push", icon: "push", disabled: !remote, run: (cx) => this.commit(cx, true) },
+-      { label: "Stash all", icon: "stash", disabled: !this.entries.length, run: (cx) => this.stash(cx, false) },
+-      { separator: true },
+-      { label: "Uncommit last commit", icon: "undo", hint: "keep changes", disabled: !this.last, run: (cx) => this.uncommit(cx) },
++      { label: "修补上一次提交", check: Boolean(this.amend), disabled: !this.last, run: (cx) => this.toggleAmend(cx) },
++      { label: "签名", check: this.signoff, run: () => { this.signoff = !this.signoff; localStorage.setItem("signoff", this.signoff ? "1" : "0"); } },
++      { separator: true },
++      { label: this.amend ? "修补并推送" : "提交并推送", icon: "push", disabled: !remote, run: (cx) => this.commit(cx, true) },
++      { label: "贮藏全部", icon: "stash", disabled: !this.entries.length, run: (cx) => this.stash(cx, false) },
++      { separator: true },
++      { label: "撤销上一次提交", icon: "undo", hint: "保留更改", disabled: !this.last, run: (cx) => this.uncommit(cx) },
+     ], cx);
+   }
+ 
+@@ -375,9 +375,9 @@
+       const r = await exec("git", [...G.READ, ...G.BRANCHES], { cwd: root, on });
+       const names = r.code === 0 ? r.stdout.split("\n").filter(Boolean) : [];
+       this.menu([
+-        ...names.map((n) => ({ label: n, check: n === current, run: (cx) => n !== current && this.act(cx, "Switch branch", G.checkoutArgs(n), { done: `Switched to ${n}` }) })),
++        ...names.map((n) => ({ label: n, check: n === current, run: (cx) => n !== current && this.act(cx, "切换分支", G.checkoutArgs(n), { done: `已切换到 ${n}` }) })),
+         { separator: true },
+-        current && { label: "Copy branch name", icon: "copy", copy: current },
++        current && { label: "复制分支名", icon: "copy", copy: current },
+       ], cx, 280);
+     });
+   }
+@@ -393,7 +393,7 @@
+       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+       .on_click((_e, cx) => { cx.stop_propagation(); if (!disabled) onClick(cx); })
+       .child(svg(icon(name)).size(13).flex_none())
+-      .when(Boolean(label || armed), (e) => e.child(armed ? "Sure?" : label));
++      .when(Boolean(label || armed), (e) => e.child(armed ? "确定？" : label));
+   }
+ 
+   // Connected icon toggles: one cell per choice, the chosen one highlighted.
+@@ -459,8 +459,8 @@
+         .child(div().max_w(240).min_w(0).truncate().text_color(e.status === "D" ? t.muted : t.foreground).when(e.status === "D", (el) => el.line_through()).child(name))
+         .when(!tree, (el) => el.child(div().pl(6).min_w(0).flex_1().truncate().text_size(11).text_color(t.dim).child(parts.join("/")))))
+       .when(hovered, (el) => el
+-        .child(this.iconButton(`discard-${id}`, e.untracked ? "trash" : "undo", e.untracked ? "Trash file" : "Discard changes",
+-          (cx) => this.arm(`discard-${id}`, cx, () => this.act(cx, "Discard", G.discardArgs(e, this.hasHead))), t, { danger: true })))
++        .child(this.iconButton(`discard-${id}`, e.untracked ? "trash" : "undo", e.untracked ? "删除文件" : "丢弃更改",
++          (cx) => this.arm(`discard-${id}`, cx, () => this.act(cx, "丢弃", G.discardArgs(e, this.hasHead))), t, { danger: true })))
+       .when(!hovered && !e.untracked, (el) => el
+         .child(div().text_size(11).text_color(t.ansi2).child(`+${e.add}`))
+         .child(div().text_size(11).text_color(t.ansi1).child(`−${e.del}`)));
+@@ -498,9 +498,9 @@
+       .child(div().flex_1().min_w(0).truncate().child(s.subject || s.ref))
+       .when(!hovered, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(s.when)))
+       .when(hovered, (el) => el
+-        .child(this.iconButton(`apply-${s.ref}`, "check", "Apply (keep the stash)", (cx) => this.act(cx, "Apply stash", G.stashArgs("apply", s.ref)), t))
+-        .child(this.iconButton(`pop-${s.ref}`, "fetch", "Pop (apply and drop)", (cx) => this.act(cx, "Pop stash", G.stashArgs("pop", s.ref)), t))
+-        .child(this.iconButton(`drop-${s.ref}`, "trash", "Drop", (cx) => this.arm(`drop-${s.ref}`, cx, () => this.act(cx, "Drop stash", G.stashArgs("drop", s.ref))), t, { danger: true })));
++        .child(this.iconButton(`apply-${s.ref}`, "check", "应用（保留贮藏）", (cx) => this.act(cx, "应用贮藏", G.stashArgs("apply", s.ref)), t))
++        .child(this.iconButton(`pop-${s.ref}`, "fetch", "弹出（应用并删除）", (cx) => this.act(cx, "弹出贮藏", G.stashArgs("pop", s.ref)), t))
++        .child(this.iconButton(`drop-${s.ref}`, "trash", "删除", (cx) => this.arm(`drop-${s.ref}`, cx, () => this.act(cx, "删除贮藏", G.stashArgs("drop", s.ref))), t, { danger: true })));
+   }
+ 
+   // A row of the graph picked: the uncommitted row shows every change.
+@@ -519,7 +519,7 @@
+   changesList(t) {
+     const out = [], conflicts = [], tracked = [], untracked = [];
+     for (const e of this.entries) (e.conflict ? conflicts : e.untracked ? untracked : tracked).push(e);
+-    for (const [area, title, list] of [["conflict", "Conflicts", conflicts], ["tracked", "Tracked", tracked], ["untracked", "Untracked", untracked], ["stash", "Stashes", this.stashes]]) {
++    for (const [area, title, list] of [["conflict", "冲突", conflicts], ["tracked", "已跟踪", tracked], ["untracked", "未跟踪", untracked], ["stash", "贮藏", this.stashes]]) {
+       if (!list.length) continue;
+       out.push(this.sectionHeader(area, title, list, t));
+       if (this.collapsed[area]) continue;
+@@ -528,8 +528,8 @@
+     }
+     if (!this.entries.length) {
+       out.unshift(v_flex().py(18).gap(4).items_center().text_color(t.dim)
+-        .child(div().child(this.loading && !this.root ? "Loading…" : "No changes to commit"))
+-        .when(this.branch?.ahead > 0, (e) => e.child(div().text_size(11).child(`${this.branch.ahead} commit${this.branch.ahead > 1 ? "s" : ""} to push`))));
++        .child(div().child(this.loading && !this.root ? "加载中…" : "没有可提交的更改"))
++        .when(this.branch?.ahead > 0, (e) => e.child(div().text_size(11).child(`有 ${this.branch.ahead} 个提交待推送`))));
+     }
+     return { out };
+   }
+@@ -539,8 +539,8 @@
+       .text_color(this.tab === id ? t.foreground : t.muted).when(this.tab === id, (e) => e.border_b(2).border_color(t.accent)).hover((s) => s.text_color(t.foreground))
+       .on_click((_e, cx) => this.setTab(id, cx)).child(label);
+     return h_flex().h(34).flex_none().border_b(1).border_color(t.border)
+-      .child(tab("changes", this.entries.length ? `Changes (${this.entries.length})` : "Changes"))
+-      .child(tab("history", "History"));
++      .child(tab("changes", this.entries.length ? `更改 (${this.entries.length})` : "更改"))
++      .child(tab("history", "历史"));
+   }
+ 
+   toolbar(t) {
+@@ -553,37 +553,37 @@
+         .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => { if (!on) { h.setAll(all); this.refresh(cx); cx.notify(); } }).child(text);
+       return h_flex().h(32).flex_none().px(8).gap(6).items_center().border_b(1).border_color(t.border)
+         .child(h_flex().p(2).gap(2).rounded(7).border_1().border_color(t.border)
+-          .child(segment("history-all", "All branches", h.all, true)).child(segment("history-current", "Current", !h.all, false)))
+-        .child(this.iconButton("history-remotes", "cloud", h.remotes ? "Showing every remote branch: click to show only the upstream" : "Showing only the upstream: click to show every remote branch",
++          .child(segment("history-all", "所有分支", h.all, true)).child(segment("history-current", "当前分支", !h.all, false)))
++        .child(this.iconButton("history-remotes", "cloud", h.remotes ? "显示所有远程分支：点击只显示上游" : "只显示上游：点击显示所有远程分支",
+           (cx) => { h.setRemotes(!h.remotes); this.refresh(cx); cx.notify(); }, t, { active: h.remotes, disabled: !h.all }))
+         .child(div().flex_1().text_right().text_size(11).text_color(t.dim).child(n ? `${n}${h.hasMore ? "+" : ""}` : ""))
+-        .child(this.iconButton("refresh-h", "refresh", "Refresh", (cx) => this.refresh(cx), t, { disabled: busy }));
++        .child(this.iconButton("refresh-h", "refresh", "刷新", (cx) => this.refresh(cx), t, { disabled: busy }));
+     }
+     return h_flex().h(32).flex_none().px(8).gap(4).items_center().border_b(1).border_color(t.border)
+-      .child(this.iconButton("view-diff", "diff", "Show every change in the main area", (cx) => this.pick({ area: "all" }, cx), t, { label: "View Diff", disabled: !any }))
++      .child(this.iconButton("view-diff", "diff", "在主区域显示全部更改", (cx) => this.pick({ area: "all" }, cx), t, { label: "查看差异", disabled: !any }))
+       .when(any, (e) => e.child(div().pl(4).text_size(11).text_color(t.ansi2).child(`+${add}`)).child(div().text_size(11).text_color(t.ansi1).child(`−${del}`)))
+       .child(div().flex_1())
+-      .child(this.pills("list", [["tree", "list-tree", "Folder tree"], ["flat", "list", "Flat list"]], this.listMode, (m, cx) => this.setListMode(m, cx), t))
+-      .child(this.pills("layout", [["unified", "rows", "Diff in one column"], ["split", "columns", "Diff in two columns: before | after"]], getLayout(), (m, cx) => { setLayout(m); cx.notify(); }, t))
+-      .child(this.iconButton("options", "sliders", "More", (cx) => this.optionsMenu(cx), t))
+-      .child(this.iconButton("stage-all", allStaged ? "minus" : "plus", allStaged ? "Unstage everything" : "Stage everything",
+-        (cx) => this.act(cx, allStaged ? "Unstage" : "Stage", allStaged ? G.unstageAllArgs(this.hasHead) : G.stageAllArgs()), t, { label: allStaged ? "Unstage All" : "Stage All", disabled: busy || !any }));
++      .child(this.pills("list", [["tree", "list-tree", "文件夹树"], ["flat", "list", "平铺列表"]], this.listMode, (m, cx) => this.setListMode(m, cx), t))
++      .child(this.pills("layout", [["unified", "rows", "单栏显示差异"], ["split", "columns", "双栏显示差异：修改前 | 修改后"]], getLayout(), (m, cx) => { setLayout(m); cx.notify(); }, t))
++      .child(this.iconButton("options", "sliders", "更多", (cx) => this.optionsMenu(cx), t))
++      .child(this.iconButton("stage-all", allStaged ? "minus" : "plus", allStaged ? "取消暂存全部" : "暂存全部",
++        (cx) => this.act(cx, allStaged ? "取消暂存" : "暂存", allStaged ? G.unstageAllArgs(this.hasHead) : G.stageAllArgs()), t, { label: allStaged ? "全部取消暂存" : "全部暂存", disabled: busy || !any }));
+   }
+ 
+   branchRow(t) {
+     const b = this.branch, busy = Boolean(this.busy), action = G.remoteAction(b, this.remotes, this.hasHead);
+-    const name = b.detached ? `detached ${b.oid?.slice(0, 7) ?? ""}` : b.head;
++    const name = b.detached ? `分离 ${b.oid?.slice(0, 7) ?? ""}` : b.head;
+     return h_flex().h(34).flex_none().px(10).gap(6).items_center()
+-      .child(h_flex().id("branch").min_w(0).flex_1().gap(5).items_center().cursor_pointer().text_size(12).tooltip(b.upstream ? `Tracking ${b.upstream}` : "No upstream")
++      .child(h_flex().id("branch").min_w(0).flex_1().gap(5).items_center().cursor_pointer().text_size(12).tooltip(b.upstream ? `跟踪 ${b.upstream}` : "无上游")
+         .on_click((_e, cx) => this.branchMenu(cx))
+         .child(svg(icon("branch")).size(13).flex_none().text_color(t.muted))
+         .child(div().flex_none().text_color(t.muted).child(this.root.split("/").pop()))
+         .child(div().flex_none().text_color(t.dim).child("/"))
+         .child(div().min_w(0).truncate().hover((s) => s.text_color(t.accent)).child(name))
+         .child(svg(icon("chevron-down")).size(11).flex_none().text_color(t.dim)))
+-      .when(Boolean(action), (e) => e.child(this.split("remote", busy && /Push|Pull|Fetch/.test(this.busy) ? `${this.busy}…` : action.count ? `${action.count} ${action.label}` : action.label, t, {
++      .when(Boolean(action), (e) => e.child(this.split("remote", busy && /推送|拉取|获取/.test(this.busy) ? `${this.busy}…` : action.count ? `${action.count} ${action.label}` : action.label, t, {
+         enabled: !busy, iconName: action.count ? null : action.type === "pull" ? "fetch" : action.type === "push" ? "push" : "refresh",
+-        tip: action.type === "push" ? (b.upstream ? `Push to ${b.upstream}` : "Push and set upstream") : action.type === "pull" ? `Pull ${b.upstream} (fast-forward only)` : "Fetch from every remote",
++        tip: action.type === "push" ? (b.upstream ? `推送到 ${b.upstream}` : "推送并设置上游") : action.type === "pull" ? `拉取 ${b.upstream}（仅快进）` : "从所有远程获取",
+         onClick: (cx) => this.remote(cx, action.type), onMenu: (cx) => this.remoteMenu(cx),
+       })));
+   }
+@@ -593,7 +593,7 @@
+     return div().id("commit-editor").relative().mx(10).min_h(70).px(10).py(8).rounded(8).border_1().border_color(this.typing ? t.accent : t.border).bg(t.background).cursor_text()
+       .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.editor.focus(); })
+       .when(!this.message, (e) => e.child(div().absolute().top(8).left(10).right(10).truncate().text_size(12).text_color(t.dim)
+-        .font_family("JetBrains Mono").child(hint || (this.amend ? "Amend message (empty keeps the last one)" : "Enter commit message"))))
++        .font_family("JetBrains Mono").child(hint || (this.amend ? "修补信息（留空则沿用上一条）" : "输入提交信息"))))
+       .child(Textarea.new(this.editor).w_full().text_size(12).text_color(t.foreground).font_family("JetBrains Mono"));
+   }
+ 
+@@ -601,13 +601,13 @@
+     const busy = Boolean(this.busy) || this.loading, mode = this.mode();
+     const hasMessage = Boolean(this.message.trim() || this.suggestion());
+     const canCommit = !busy && (this.amend ? Boolean(this.last) : hasMessage && (mode === "staged" || mode === "tracked"));
+-    const label = this.busy && /Commit|Amend/.test(this.busy) ? "Committing…" : this.amend ? "Amend" : mode === "tracked" ? "Commit Tracked" : "Commit";
+-    const tip = this.amend ? "Replace the last commit" : mode === "tracked" ? "Nothing staged: commit every tracked change (git commit -a)" : mode === "conflict" ? "Resolve the conflicts first" : "Commit the staged changes · ⌘↩";
++    const label = this.busy && /提交|修补/.test(this.busy) ? "提交中…" : this.amend ? "修补" : mode === "tracked" ? "提交已跟踪" : "提交";
++    const tip = this.amend ? "替换上一次提交" : mode === "tracked" ? "没有暂存内容：提交所有已跟踪更改（git commit -a）" : mode === "conflict" ? "请先解决冲突" : "提交暂存内容 · Ctrl+Enter";
+     return v_flex().flex_none().gap(8).pt(2).pb(8)
+       .child(this.editorBox(t))
+       .child(h_flex().px(10).gap(6).items_center()
+-        .when(this.amend, (e) => e.child(div().px(6).py(1).rounded(4).bg(t.accent + "22").text_size(11).text_color(t.accent).child("amend")))
+-        .when(this.signoff, (e) => e.child(div().px(6).py(1).rounded(4).bg(t.raised).text_size(11).text_color(t.muted).child("signoff")))
++        .when(this.amend, (e) => e.child(div().px(6).py(1).rounded(4).bg(t.accent + "22").text_size(11).text_color(t.accent).child("修补")))
++        .when(this.signoff, (e) => e.child(div().px(6).py(1).rounded(4).bg(t.raised).text_size(11).text_color(t.muted).child("签名")))
+         .child(div().flex_1())
+         .child(this.split("commit", label, t, { primary: true, enabled: canCommit, tip, onClick: (cx) => this.commit(cx, false), onMenu: (cx) => this.commitOptions(cx) })));
+   }
+@@ -616,7 +616,7 @@
+   copyHash(c, cx) {
+     cx.write_to_clipboard(c.hash);
+     this.copied = c.hash;
+-    notify({ title: "Copied commit hash", body: c.hash, level: "success", timeout: 2000 });
++    notify({ title: "已复制提交哈希", body: c.hash, level: "success", timeout: 2000 });
+     cx.timer.after(1500, (cx) => { if (this.copied === c.hash) { this.copied = null; cx.notify(); } });
+     cx.notify();
+   }
+@@ -625,7 +625,7 @@
+     const done = this.copied === c.hash;
+     return h_flex().id(`hash-${c.hash}`).flex_none().h(20).px(5).gap(4).items_center().rounded(5).cursor_pointer()
+       .font_family(settings().font_family ?? "JetBrains Mono").text_size(11).text_color(done ? t.ansi2 : t.dim)
+-      .hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip(`Copy ${c.hash}`)
++      .hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip(`复制 ${c.hash}`)
+       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+       .on_click((_e, cx) => { cx.stop_propagation(); this.copyHash(c, cx); })
+       .child(c.short)
+@@ -639,8 +639,8 @@
+       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.commitMenu(c, cx); })
+       .child(this.hashChip(c, t))
+       .child(div().flex_1().min_w(0).truncate().text_color(this.isShown(c) ? t.accent : t.muted).child(c.subject))
+-      .child(this.iconButton("uncommit", "undo", "Uncommit (keep the changes staged)", (cx) => this.arm("uncommit", cx, () => this.uncommit(cx)), t, { disabled: Boolean(this.busy) }))
+-      .child(this.iconButton("history", "history", "History", (cx) => this.setTab("history", cx), t));
++      .child(this.iconButton("uncommit", "undo", "撤销提交（保留暂存）", (cx) => this.arm("uncommit", cx, () => this.uncommit(cx)), t, { disabled: Boolean(this.busy) }))
++      .child(this.iconButton("history", "history", "历史", (cx) => this.setTab("history", cx), t));
+   }
+ 
+   render(cx) {
+@@ -653,7 +653,7 @@
+     const list = !history && this.root ? this.changesList(t).out : [];
+     const graph = history && (this.history.commits.length
+       ? this.historyView(t)
+-      : div().flex_1().p(12).text_color(t.dim).child(this.hasHead ? "Loading history…" : "No commits yet"));
++      : div().flex_1().p(12).text_color(t.dim).child(this.hasHead ? "正在加载历史…" : "还没有提交"));
+     return v_flex().id("git-changes").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13).track_focus(this.handle)
+       .on_size_change((size, cx) => {
+         const width = Math.round(size.width / (settings().zoom ?? 1));
+@@ -670,9 +670,9 @@
+       .when(history, (e) => e.child(v_flex().flex_1().min_h(0).child(graph)))
+       .when(!history, (e) => e.child(v_flex().id("git-changes-list").flex_1().min_h(0).overflow_y_scrollbar().p(6)
+         .children(list)
+-        .when(!this.root, (el) => el.child(div().p(8).text_color(t.dim).child(this.error || (this.loading ? "Loading changes…" : "No folder"))))))
+-      .when(this.limited, (e) => e.child(div().px(12).py(4).text_size(11).text_color(t.dim).child(`Showing the first ${G.LIMIT.toLocaleString()} files`)))
+-      .when(Boolean(this.note), (e) => e.child(div().id("note").px(10).py(6).flex_none().border_t(1).border_color(t.border).text_size(11).text_color(t.ansi1).cursor_pointer().tooltip("Click to dismiss")
++        .when(!this.root, (el) => el.child(div().p(8).text_color(t.dim).child(this.error || (this.loading ? "正在加载更改…" : "没有文件夹"))))))
++      .when(this.limited, (e) => e.child(div().px(12).py(4).text_size(11).text_color(t.dim).child(`仅显示前 ${G.LIMIT.toLocaleString()} 个文件`)))
++      .when(Boolean(this.note), (e) => e.child(div().id("note").px(10).py(6).flex_none().border_t(1).border_color(t.border).text_size(11).text_color(t.ansi1).cursor_pointer().tooltip("点击关闭")
+         .on_click((_e, cx) => { this.note = null; cx.notify(); }).child(this.note)))
+       .when(Boolean(this.root && this.branch), (e) => e.child(v_flex().flex_none().border_t(1).border_color(t.border).bg(t.chrome)
+         .child(this.branchRow(t))
