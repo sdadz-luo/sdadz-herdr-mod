@@ -63,7 +63,8 @@ rm -rf .tmp
 
 ```sh
 git clone --depth 1 https://github.com/linziyanleo/herdr-mods.git .tmp/herdr-mods
-diff -ru .tmp/herdr-mods/files-plus/mods/files-plus mods/files-plus > patches/files-plus-local.patch
+python scripts/mkpatch.py .tmp/herdr-mods/files-plus/mods/files-plus mods/files-plus patches/files-plus-local.patch
+python scripts/mkpatch.py .tmp/herdr-mods/preview-plus/mods/preview-plus mods/preview-plus patches/preview-plus-local.patch
 rm -rf .tmp
 ```
 
