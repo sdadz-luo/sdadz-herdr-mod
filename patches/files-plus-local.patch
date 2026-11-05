@@ -106,7 +106,7 @@
    if (!target.on && window().platform === "macos") {
      const trash = joinPath(home(), ".Trash");
      await checked("mkdir", ["-p", trash], null);
-@@ -152,7 +152,7 @@
+@@ -152,29 +152,39 @@
  }
  export async function reveal(target) {
    ensureTarget(target);
@@ -115,7 +115,18 @@
    const platform = window().platform;
    if (platform === "macos") await checked("open", ["-R", target.path], null);
    else if (platform === "windows") await checked("explorer.exe", [`/select,${target.path.replace(/\//g, "\\")}`], null);
-@@ -162,19 +162,19 @@
+   else await checked("xdg-open", [dirname(target.path)], null);
+ }
++export async function openInBrowser(target) {
++  ensureTarget(target);
++  if (target.on !== null) throw new Error("仅本地文件可在浏览器中打开");
++  if (target.kind !== "file" || !/\.html?$/i.test(target.path)) throw new Error("仅 HTML 文件可在浏览器中打开");
++  const platform = window().platform;
++  // explorer.exe 走文件关联启动默认浏览器；带 /select 会变成选中文件，不能用。
++  const command = platform === "macos" ? "open" : platform === "windows" ? "explorer.exe" : "xdg-open";
++  await checked(command, [platform === "windows" ? target.path.replace(/\//g, "\\") : target.path], null);
++}
+ export async function installed(name) { return await readTextFile(joinPath(appHome(), `mods/${name}/mod.json`)) !== null; }
  export function menuItems(target) {
    const clip = shared(CLIPBOARD), root = target.kind === "root" || target.path === target.root;
    return [
@@ -135,6 +146,7 @@
 +    { id: "path", label: "复制路径", enabled: true },
 +    { id: "relative", label: "复制相对路径", enabled: true },
 +    { id: "reveal", label: window().platform === "macos" ? "在访达中显示" : window().platform === "windows" ? "在资源管理器中显示" : "在文件管理器中显示", enabled: target.on === null },
++    { id: "browser", label: "用浏览器打开", enabled: target.on === null && target.kind === "file" && /\.html?$/i.test(target.path) },
 +    { id: "new-file", label: "新建文件…", enabled: true, group: true },
 +    { id: "new-folder", label: "新建文件夹…", enabled: true },
 +    { id: "rename", label: "重命名…", enabled: !root },
@@ -210,7 +222,24 @@
    const x = Math.max(8, Math.min(view.cursor.x / scale + 12, screen.width / scale - width - 8));
 --- a/main.js
 +++ b/main.js
-@@ -143,16 +143,16 @@
+@@ -5,7 +5,7 @@
+ import { prune, basename, relativePath } from "./roots.js";
+ import { workspaceSnapshot, changeRoots } from "./config.js";
+ import { appearance } from "./appearance.js";
+-import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
++import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, openInBrowser, changed } from "./actions.js";
+ import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
+ import { renderDrag } from "./drag.js";
+ import { OPEN_LOCATION, OPEN_OPTIONS, openLocation } from "./preferences.js";
+@@ -67,6 +67,7 @@
+         else if (item.id === "path") cx.write_to_clipboard(target.path);
+         else if (item.id === "relative") cx.write_to_clipboard(relativePath(target.root, target.path));
+         else if (item.id === "reveal") await reveal(target);
++        else if (item.id === "browser") await openInBrowser(target);
+         else if (item.id === "new-here") run("tab.new", { space: target.space, folder: target.root });
+         // Keep this owner alive until its asynchronous operation has finished.
+         closeOverlay(props().overlay);
+@@ -143,16 +144,16 @@
          if (event.key === "escape") { if (!this.busy) closeOverlay(props().overlay); cx.stop_propagation(); }
          else if (event.key === "enter" && !this.input) { this.submit(cx); cx.stop_propagation(); }
        })
@@ -234,7 +263,7 @@
    }
    renderSettings() {
      const { colors: t, font } = appearance(), selected = openLocation(shared(OPEN_LOCATION));
-@@ -165,15 +165,15 @@
+@@ -165,15 +166,15 @@
          } else return;
          cx.stop_propagation(); cx.notify();
        })
