@@ -11,9 +11,9 @@ Herdr 的文件树面板：文件夹树 / 平铺列表、多根工作区、右�
   （MIT，见 `LICENSE-material-icon-theme.txt`），按 VS Code 的规则匹配：
   路径规则 → 文件名 → 最长扩展名；文件夹按名称匹配，展开时用 open 变体，
   浅色主题优先用浅色变体。原来固定的 `file.svg` / `folder.svg` 不再使用。
-- **HTML 用浏览器打开**：文件树右键菜单新增「用浏览器打开」，只对本地
-  `.html` / `.htm` 文件显示，交给系统默认浏览器（Windows 用
-  `explorer.exe`，走 `.html` 文件关联）。
+- **用系统默认应用打开**：文件树右键菜单新增「打开」，对任意本地文件可用
+  （Word、PDF、PPT、HTML、压缩包、可执行文件等），交给系统文件关联；
+  远程文件与目录不启用。Windows 用 `explorer.exe`。
 - **汉化**：界面文字、菜单、错误提示。
 - **Windows 中文文件名修复**：`roots.js` 里的路径归一化处理。
 - **目录读取重构**（`workspace.js`）：

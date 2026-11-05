@@ -5,7 +5,7 @@ import { FilesPanel } from "./workspace.js";
 import { prune, basename, relativePath } from "./roots.js";
 import { workspaceSnapshot, changeRoots } from "./config.js";
 import { appearance } from "./appearance.js";
-import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, openInBrowser, changed } from "./actions.js";
+import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, openWithSystem, changed } from "./actions.js";
 import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 import { renderDrag } from "./drag.js";
 import { OPEN_LOCATION, OPEN_OPTIONS, openLocation } from "./preferences.js";
@@ -67,7 +67,7 @@ export default class FilesPlus extends FilesPanel {
         else if (item.id === "path") cx.write_to_clipboard(target.path);
         else if (item.id === "relative") cx.write_to_clipboard(relativePath(target.root, target.path));
         else if (item.id === "reveal") await reveal(target);
-        else if (item.id === "browser") await openInBrowser(target);
+        else if (item.id === "open") await openWithSystem(target);
         else if (item.id === "new-here") run("tab.new", { space: target.space, folder: target.root });
         // Keep this owner alive until its asynchronous operation has finished.
         closeOverlay(props().overlay);

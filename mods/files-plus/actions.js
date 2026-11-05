@@ -158,12 +158,11 @@ export async function reveal(target) {
   else if (platform === "windows") await checked("explorer.exe", [`/select,${target.path.replace(/\//g, "\\")}`], null);
   else await checked("xdg-open", [dirname(target.path)], null);
 }
-export async function openInBrowser(target) {
+export async function openWithSystem(target) {
   ensureTarget(target);
-  if (target.on !== null) throw new Error("仅本地文件可在浏览器中打开");
-  if (target.kind !== "file" || !/\.html?$/i.test(target.path)) throw new Error("仅 HTML 文件可在浏览器中打开");
+  if (target.on !== null) throw new Error("仅本地文件可用系统应用打开");
+  if (target.kind !== "file") throw new Error("仅文件可用系统应用打开");
   const platform = window().platform;
-  // explorer.exe 走文件关联启动默认浏览器；带 /select 会变成选中文件，不能用。
   const command = platform === "macos" ? "open" : platform === "windows" ? "explorer.exe" : "xdg-open";
   await checked(command, [platform === "windows" ? target.path.replace(/\//g, "\\") : target.path], null);
 }
@@ -177,7 +176,7 @@ export function menuItems(target) {
     { id: "path", label: "复制路径", enabled: true },
     { id: "relative", label: "复制相对路径", enabled: true },
     { id: "reveal", label: window().platform === "macos" ? "在访达中显示" : window().platform === "windows" ? "在资源管理器中显示" : "在文件管理器中显示", enabled: target.on === null },
-    { id: "browser", label: "用浏览器打开", enabled: target.on === null && target.kind === "file" && /\.html?$/i.test(target.path) },
+    { id: "open", label: "打开", enabled: target.on === null && target.kind === "file" },
     { id: "new-file", label: "新建文件…", enabled: true, group: true },
     { id: "new-folder", label: "新建文件夹…", enabled: true },
     { id: "rename", label: "重命名…", enabled: !root },
