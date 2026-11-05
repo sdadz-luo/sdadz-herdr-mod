@@ -64,7 +64,10 @@ export class Panel {
     this.editor.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
     this.editor.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     this.refresh(cx);
-    cx.timer.every(10000, (cx) => this.refresh(cx));
+    // The folder watch covers local edits; polling is the remote fallback and
+    // a slow local safety net for a watch that died.
+    cx.timer.every(10000, (cx) => { if (this.on) this.refresh(cx); });
+    cx.timer.every(60000, (cx) => { if (!this.on) this.refresh(cx); });
   }
 
   // --- reading ----------------------------------------------------------------

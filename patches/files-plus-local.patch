@@ -569,7 +569,7 @@
  }
  
  export class FilesPanel extends View {
-@@ -68,7 +94,7 @@
+@@ -68,14 +94,21 @@
    }
    initPanel(cx) {
      this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
@@ -578,7 +578,22 @@
      this.look = appearance();
      this.lookKey = JSON.stringify(this.look);
      this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
-@@ -123,18 +149,56 @@
+     this.revision = shared(REVISION);
+     this.refresh(cx);
+     cx.timer.every(10000, cx => { if (this.on) this.refresh(cx); });
+-    cx.timer.every(60000, cx => { if (!this.on && this.visible !== false) this.refresh(cx, { recover: true }); });
++    cx.timer.every(300000, cx => {
++      if (this.on || this.visible === false) return;
++      const roots = this.rootInfo || [];
++      // A live watch reports every change; refresh only when a root is missing
++      // from it, as a last resort.
++      if (roots.length && roots.every(root => !root.exists || this.watches.has(root.path))) return;
++      this.refresh(cx, { recover: true });
++    });
+   }
+   watch(path, cx) {
+     if (this.on || this.watches.has(path)) return;
+@@ -123,18 +156,56 @@
      });
    }
    current(context, loc = this.location()) { return this.context === context && (this.role === "preview" ? context !== null : loc.key === context); }
@@ -636,7 +651,7 @@
        if (entries !== this.entries || pending.get(path) !== request || !this.current(context) || !this.folders.has(path)) return false;
        const used = this.entryCount - (this.entries.get(path)?.length || 0);
        const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
-@@ -155,7 +219,7 @@
+@@ -155,7 +226,7 @@
      if (context !== this.context) {
        this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
        this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
@@ -645,7 +660,7 @@
        this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
        this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
        this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
-@@ -178,7 +242,7 @@
+@@ -178,7 +249,7 @@
          if (!this.current(context) || generation !== this.generation) return;
          if (!same(roots, this.rootInfo)) this.treeVersion++;
          this.rootInfo = roots;
@@ -654,7 +669,7 @@
          const queue = [...(options.paths || this.folders)], listing = queue.length > 0;
          let readError = null;
          await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
-@@ -222,6 +286,7 @@
+@@ -222,6 +293,7 @@
          if (!same(this.marks, marks)) { this.marks = marks; this.treeVersion++; }
          if (listing) this.error = readError;
          for (const root of roots) if (root.exists) this.watch(root.path, cx);
@@ -662,7 +677,7 @@
          if (this.file) this.show(this.file, cx);
        } catch (error) { if (this.current(context) && generation === this.generation) this.error = error.message || String(error); }
        finally {
-@@ -256,7 +321,7 @@
+@@ -256,7 +328,7 @@
            let completed = false;
            try { completed = await this.loadFolder(path, context); }
            catch (error) { if (this.current(context)) { completed = true; this.error = error.message || String(error); } }
@@ -671,7 +686,7 @@
          });
        }
      }
-@@ -265,22 +330,26 @@
+@@ -265,22 +337,26 @@
    openFile(path, root, cx) {
      this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
      const request = this.openRequest = {};
@@ -710,7 +725,7 @@
            if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
            else run("pane.split", { pane, direction: "right", mod, props: previewProps });
          } else if (rich) {
-@@ -288,7 +357,7 @@
+@@ -288,7 +364,7 @@
            run("layout.select", { stack, child: "preview-plus" });
          } else this.show(path, cx);
        } catch {
@@ -719,7 +734,7 @@
        }
        cx.notify();
      });
-@@ -310,12 +379,12 @@
+@@ -310,12 +386,12 @@
          if (text === null || text.includes("\0")) {
            changed = Boolean(this.code);
            this.code?.release(); this.code = null;
@@ -735,7 +750,31 @@
        finally { if (changed && this.previewRequest === request && this.current(context)) cx.notify(); }
      });
    }
-@@ -340,7 +409,7 @@
+@@ -330,7 +406,22 @@
+     this.context = JSON.stringify([p.file, p.on]);
+     this.on = p.on ?? null;
+     this.show(p.file, cx);
+-    cx.timer.every(10000, cx => this.show(p.file, cx));
++    if (this.on) { cx.timer.every(10000, cx => this.show(p.file, cx)); return; }
++    const context = this.context;
++    cx.spawn(async cx => {
++      try {
++        for (;;) {
++          const paths = await watchFolder(dirname(p.file));
++          if (this.context !== context) return;
++          // The event names one path; re-reading the small preview is cheaper
++          // than matching Windows' physical paths.
++          if (paths.length) this.show(p.file, cx);
++        }
++      } catch {
++        // A folder that cannot be watched keeps the old poll.
++        if (this.context === context) cx.timer.every(10000, cx => this.show(p.file, cx));
++      }
++    });
+   }
+   renderPreview(cx) {
+     const { colors: t, font } = appearance();
+@@ -340,7 +431,7 @@
      return v_flex().id("file-viewer").size_full().min_w(0).min_h(0).bg(t.background).text_color(t.foreground).font_family(font).text_size(13)
        .child(div().h(42).px(14).flex().items_center().flex_none().border_b(0.5).border_color(t.border)
          .child(div().truncate().tooltip(this.file).font_semibold().child(basename(this.file))))
@@ -744,7 +783,7 @@
    }
    target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
    menu(path, kind, root, event, cx) {
-@@ -382,7 +451,7 @@
+@@ -382,7 +473,7 @@
      if (lookChanged || chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this, look });
      this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
    }
@@ -753,7 +792,7 @@
    scheduleFit(cx, cause = "background") {
      const fit = props()?.fit;
      if (!fit?.node || this.file) return;
-@@ -446,11 +515,11 @@
+@@ -446,11 +537,11 @@
        .on_mouse_move((event, cx) => dragMove(this, event, cx))
        .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
        .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
@@ -767,7 +806,7 @@
            .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
              if (!add) return;
              const root = entry?.folders[0]?.path || this.root;
-@@ -459,7 +528,7 @@
+@@ -459,7 +550,7 @@
              cx.stop_propagation();
            }).child(svg("mods/files-plus/plus.svg").size(14)))
          .when(Boolean(this.file), el => el.child(div().max_w(140).truncate().text_size(12).text_color(t.dim).tooltip(this.file).child(title)))
@@ -776,7 +815,7 @@
            .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
            .on_click((_event, cx) => {
              cx.stop_propagation();
-@@ -469,7 +538,7 @@
+@@ -469,7 +560,7 @@
        .when(!this.file, el => el.child(this.treeView))
        .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
          .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)

@@ -85,7 +85,10 @@ export class DiffView {
     this.rows = []; this.pairs = null; this.width = 300; this.offset = 0;
     this.sync(cx);
     // Picks arrive through shared state, which re-renders this copy; files change under it.
-    cx.timer.every(10000, (cx) => this.reload(cx));
+    // A commit's diff never changes, so only working-tree views poll: the
+    // remote one quickly, the local one as a slow watch fallback.
+    cx.timer.every(10000, (cx) => { if (this.on && this.item?.area !== "commit") this.reload(cx); });
+    cx.timer.every(60000, (cx) => { if (!this.on && this.item?.area !== "commit") this.reload(cx); });
   }
 
   entry() { return (shared("git-changes.view") ?? {})[this.space]; }

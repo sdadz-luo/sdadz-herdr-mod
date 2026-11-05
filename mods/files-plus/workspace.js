@@ -101,7 +101,14 @@ export class FilesPanel extends View {
     this.revision = shared(REVISION);
     this.refresh(cx);
     cx.timer.every(10000, cx => { if (this.on) this.refresh(cx); });
-    cx.timer.every(60000, cx => { if (!this.on && this.visible !== false) this.refresh(cx, { recover: true }); });
+    cx.timer.every(300000, cx => {
+      if (this.on || this.visible === false) return;
+      const roots = this.rootInfo || [];
+      // A live watch reports every change; refresh only when a root is missing
+      // from it, as a last resort.
+      if (roots.length && roots.every(root => !root.exists || this.watches.has(root.path))) return;
+      this.refresh(cx, { recover: true });
+    });
   }
   watch(path, cx) {
     if (this.on || this.watches.has(path)) return;
@@ -399,7 +406,22 @@ export class FilesPanel extends View {
     this.context = JSON.stringify([p.file, p.on]);
     this.on = p.on ?? null;
     this.show(p.file, cx);
-    cx.timer.every(10000, cx => this.show(p.file, cx));
+    if (this.on) { cx.timer.every(10000, cx => this.show(p.file, cx)); return; }
+    const context = this.context;
+    cx.spawn(async cx => {
+      try {
+        for (;;) {
+          const paths = await watchFolder(dirname(p.file));
+          if (this.context !== context) return;
+          // The event names one path; re-reading the small preview is cheaper
+          // than matching Windows' physical paths.
+          if (paths.length) this.show(p.file, cx);
+        }
+      } catch {
+        // A folder that cannot be watched keeps the old poll.
+        if (this.context === context) cx.timer.every(10000, cx => this.show(p.file, cx));
+      }
+    });
   }
   renderPreview(cx) {
     const { colors: t, font } = appearance();

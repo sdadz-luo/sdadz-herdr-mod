@@ -28,6 +28,8 @@ Herdr 的文件树面板：文件夹树 / 平铺列表、多根工作区、右�
 - **所有文件交给 preview-plus**（`workspace.js` 的 `openFile`）：去掉原来的
   `RICH` 扩展名限制，`.c`、`.py`、`.json` 等也进 preview-plus 编辑，不再落
   只读的内置预览。
+- **降低后台刷新**：本地目录树的兜底刷新改为 5 分钟，且只在某个根目录没有
+  watch 时才执行；内置只读预览改由 `watchFolder` 驱动，不再每 10 秒重读。
 - **打开文件前查重**（`open-files.js`）：Windows 上改由 `node` 转发
   `hc connect`，请求以十六进制传参并保持 stdin 到收到回复为止。原实现用
   PowerShell 管道，PowerShell 会把命令行上的 JSON 当脚本重新解析，且 `hc`

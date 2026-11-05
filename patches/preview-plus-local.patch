@@ -179,16 +179,37 @@
              if (!this.current(request) || this.document !== doc) return;
              if (!this.dirty(doc) && !doc.saving && disk !== doc.base) { this.load(cx); return; }
              doc.external = disk !== doc.base;
-@@ -268,7 +286,7 @@
+@@ -268,7 +286,19 @@
          return;
        }
        if (this.loading) this.reloadPending = true; else this.load(cx);
 -    } else this.tree?.refresh(cx);
 +    }
++  }
++
++  // One save can emit several watch events; a GBK reload also spawns Python,
++  // so collapse a burst into one read.
++  queueReload(cx) {
++    if (this.reloadTimer) return;
++    const token = this.reloadTimer = {};
++    cx.timer.after(500, cx => {
++      if (this.reloadTimer !== token) return;
++      this.reloadTimer = null;
++      this.reload(cx);
++    });
    }
  
    watchTargets(files, cx) {
-@@ -318,10 +336,6 @@
+@@ -295,7 +325,7 @@
+                 const canonical = pathKey(dirname(file) === dir ? `${physical}/${basename(file)}` : file), original = pathKey(file);
+                 return original === value || canonical === value || canonical.startsWith(value + "/");
+               });
+-            })) this.reload(cx);
++            })) this.queueReload(cx);
+             pending = watchFolder(dir);
+           }
+         } catch { if (this.watchers.get(dir) === token) this.watchers.delete(dir); }
+@@ -318,10 +348,6 @@
        this.selected = previous.target; this.source = previous.source; this.zoom = previous.zoom; this.page = previous.page; this.total = 0;
        this.load(cx);
      } else if (this.owner.mode === "paired") run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" });
@@ -199,7 +220,7 @@
    }
  
    fitScale() {
-@@ -422,48 +436,48 @@
+@@ -422,48 +448,48 @@
        .on_key_down((event, cx) => this.keyDown(event, cx))
        .child(h_flex().id("preview-toolbar").h(42).flex_none().px(8).gap(2).items_center().border_b(0.5).border_color(colors.border)
          .when(Boolean(file) && panelFrame, el => el.child(button("preview-back", "←", colors, cx => this.back(cx))))
@@ -268,6 +289,15 @@
      if (this.media) {
        const size = this.mediaSize();
        const x = (this.viewport.width - size.width) / 2 + this.pan.x;
+@@ -498,7 +524,7 @@
+   }
+ 
+   async close() {
+-    this.closed = true; this.request = null; this.watchers.clear(); this.releaseEditor(); this.zoomInput.release();
++    this.closed = true; this.request = null; this.watchers.clear(); this.reloadTimer = null; this.releaseEditor(); this.zoomInput.release();
+     this.persistDrafts(); await localStorage.flush();
+   }
+ }
 --- a/media.js
 +++ b/media.js
 @@ -113,23 +113,23 @@

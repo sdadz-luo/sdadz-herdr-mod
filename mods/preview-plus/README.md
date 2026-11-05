@@ -16,6 +16,8 @@ tab/分屏模式下读 `props.file`，右侧配对模式下读 `shared("preview-
 - **语言映射扩充**：覆盖 Herdr 内嵌语法集支持的常见扩展名；`Makefile`
   按文件名识别。语法集里没有的语言（Kotlin、Swift、Dart、PowerShell、
   Dockerfile、CMake 等）显示为纯文本。
+- **watch 事件去抖**：同一文件的连续事件合并成 500ms 后的一次 reload，
+  一次保存不会让 GBK 文件重复启动 Python。
 - **汉化**：工具栏、状态提示、错误信息。
 - **Windows 中文文件名修复**：`paths.js`、`media.js`、`markdown.js`。
 - **去掉重复的文件树**：删除 `tree.js` 和 cwd 模式。上游在本 mod 里又实现了

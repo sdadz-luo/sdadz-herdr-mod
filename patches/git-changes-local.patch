@@ -39,7 +39,19 @@
    : item.area === "commit" ? item.short : item.path.split("/").pop();
  export const getLayout = () => (shared("git-changes.layout") === "split" ? "split" : "unified");
  export const setLayout = (layout) => setShared("git-changes.layout", layout);
-@@ -156,14 +156,14 @@
+@@ -85,7 +85,10 @@
+     this.rows = []; this.pairs = null; this.width = 300; this.offset = 0;
+     this.sync(cx);
+     // Picks arrive through shared state, which re-renders this copy; files change under it.
+-    cx.timer.every(10000, (cx) => this.reload(cx));
++    // A commit's diff never changes, so only working-tree views poll: the
++    // remote one quickly, the local one as a slow watch fallback.
++    cx.timer.every(10000, (cx) => { if (this.on && this.item?.area !== "commit") this.reload(cx); });
++    cx.timer.every(60000, (cx) => { if (!this.on && this.item?.area !== "commit") this.reload(cx); });
+   }
+ 
+   entry() { return (shared("git-changes.view") ?? {})[this.space]; }
+@@ -156,14 +159,14 @@
        .on_click((_e, cx) => { setLayout(id); cx.notify(); })
        .child(svg(icon(name)).size(13));
      return h_flex().p(2).gap(2).flex_none().rounded(7).border_1().border_color(t.border)
@@ -58,7 +70,7 @@
      return v_flex().flex_none().border_b(1).border_color(t.border)
        .child(h_flex().h(38).px(12).gap(8).items_center()
          .child(svg(icon(this.item.area === "commit" ? "commit" : this.item.area === "stash" ? "stash" : "file")).size(14).flex_none().text_color(t.muted))
-@@ -171,13 +171,13 @@
+@@ -171,13 +174,13 @@
          .when(add > 0, (e) => e.child(div().text_size(11.5).text_color(t.ansi2).child(`+${add}`)))
          .when(del > 0, (e) => e.child(div().text_size(11.5).text_color(t.ansi1).child(`−${del}`)))
          .child(this.toggle(t, layout))
@@ -74,7 +86,7 @@
    }
  
    unifiedRow({ kind, old, number, text }, t) {
-@@ -211,7 +211,7 @@
+@@ -211,7 +214,7 @@
      this.sync(cx);
      const t = theme(), layout = getLayout();
      const root = v_flex().id("git-changes-diff").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(12.5);
@@ -83,7 +95,7 @@
      if (layout === "split" && !this.pairs) this.pairs = G.splitRows(this.rows);
      const rows = layout === "split" ? this.pairs : this.rows;
      const heights = rows.map((r) => (r.kind === "f" ? HEAD : ROW));
-@@ -232,7 +232,7 @@
+@@ -232,7 +235,7 @@
        .child(Scrollbar.vertical(`${this.listId}-${layout}`).viewport_from_layout().absolute().inset_0());
      return root.child(this.header(t, layout))
        .when(layout === "split", (e) => e.child(h_flex().h(22).flex_none().items_center().border_b(1).border_color(t.border).text_size(11).text_color(t.muted)
@@ -244,7 +256,19 @@
    }
 --- a/panel.js
 +++ b/panel.js
-@@ -101,7 +101,7 @@
+@@ -64,7 +64,10 @@
+     this.editor.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
+     this.editor.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
+     this.refresh(cx);
+-    cx.timer.every(10000, (cx) => this.refresh(cx));
++    // The folder watch covers local edits; polling is the remote fallback and
++    // a slow local safety net for a watch that died.
++    cx.timer.every(10000, (cx) => { if (this.on) this.refresh(cx); });
++    cx.timer.every(60000, (cx) => { if (!this.on) this.refresh(cx); });
+   }
+ 
+   // --- reading ----------------------------------------------------------------
+@@ -101,7 +104,7 @@
        try {
          const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on });
          if (key() !== context) return;
@@ -253,7 +277,7 @@
          const root = top.stdout.trim(), git = (args) => exec("git", [...G.READ, ...args], { cwd: root, on });
          const status = await git(G.STATUS);
          if (status.code !== 0) throw new Error(G.gitError(status));
-@@ -168,8 +168,8 @@
+@@ -168,8 +171,8 @@
          if (done) notify({ title: done, level: "success", timeout: 3000 });
        } catch (e) {
          const message = String(e?.message ?? e);
@@ -264,7 +288,7 @@
        } finally {
          this.busy = null;
          setShared("git-graph.changed", Date.now());
-@@ -196,32 +196,32 @@
+@@ -196,32 +199,32 @@
        if (p.error) return this.fail(cx, p.error);
        cmds = [...cmds, ...p.cmds];
      }
@@ -305,7 +329,7 @@
        after: () => { if (!this.message.trim()) { this.message = subject; this.editor.set_value(subject); } } });
    }
  
-@@ -245,7 +245,7 @@
+@@ -245,7 +248,7 @@
      const paths = list.map((e) => e.path);
      if (!paths.length) return;
      const all = list.every((e) => e.staged === "all");
@@ -314,7 +338,7 @@
    }
  
    setListMode(mode, cx) { this.listMode = mode; localStorage.setItem("list", mode); cx.notify(); }
-@@ -289,23 +289,23 @@
+@@ -289,23 +292,23 @@
    fileMenu(e, cx) {
      const staged = e.staged === "all";
      this.menu([
@@ -350,7 +374,7 @@
      ], cx);
    }
  
-@@ -314,57 +314,57 @@
+@@ -314,57 +317,57 @@
      const refs = c.refs ?? [], local = refs.filter((r) => r.kind === "branch" && r.name !== current);
      const remote = refs.filter((r) => r.kind === "remote" && !refs.some((b) => b.kind === "branch" && r.name.endsWith(`/${b.name}`)));
      this.menu([
@@ -441,7 +465,7 @@
      ], cx);
    }
  
-@@ -375,9 +375,9 @@
+@@ -375,9 +378,9 @@
        const r = await exec("git", [...G.READ, ...G.BRANCHES], { cwd: root, on });
        const names = r.code === 0 ? r.stdout.split("\n").filter(Boolean) : [];
        this.menu([
@@ -453,7 +477,7 @@
        ], cx, 280);
      });
    }
-@@ -393,7 +393,7 @@
+@@ -393,7 +396,7 @@
        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
        .on_click((_e, cx) => { cx.stop_propagation(); if (!disabled) onClick(cx); })
        .child(svg(icon(name)).size(13).flex_none())
@@ -462,7 +486,7 @@
    }
  
    // Connected icon toggles: one cell per choice, the chosen one highlighted.
-@@ -459,8 +459,8 @@
+@@ -459,8 +462,8 @@
          .child(div().max_w(240).min_w(0).truncate().text_color(e.status === "D" ? t.muted : t.foreground).when(e.status === "D", (el) => el.line_through()).child(name))
          .when(!tree, (el) => el.child(div().pl(6).min_w(0).flex_1().truncate().text_size(11).text_color(t.dim).child(parts.join("/")))))
        .when(hovered, (el) => el
@@ -473,7 +497,7 @@
        .when(!hovered && !e.untracked, (el) => el
          .child(div().text_size(11).text_color(t.ansi2).child(`+${e.add}`))
          .child(div().text_size(11).text_color(t.ansi1).child(`−${e.del}`)));
-@@ -498,9 +498,9 @@
+@@ -498,9 +501,9 @@
        .child(div().flex_1().min_w(0).truncate().child(s.subject || s.ref))
        .when(!hovered, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(s.when)))
        .when(hovered, (el) => el
@@ -486,7 +510,7 @@
    }
  
    // A row of the graph picked: the uncommitted row shows every change.
-@@ -519,7 +519,7 @@
+@@ -519,7 +522,7 @@
    changesList(t) {
      const out = [], conflicts = [], tracked = [], untracked = [];
      for (const e of this.entries) (e.conflict ? conflicts : e.untracked ? untracked : tracked).push(e);
@@ -495,7 +519,7 @@
        if (!list.length) continue;
        out.push(this.sectionHeader(area, title, list, t));
        if (this.collapsed[area]) continue;
-@@ -528,8 +528,8 @@
+@@ -528,8 +531,8 @@
      }
      if (!this.entries.length) {
        out.unshift(v_flex().py(18).gap(4).items_center().text_color(t.dim)
@@ -506,7 +530,7 @@
      }
      return { out };
    }
-@@ -539,8 +539,8 @@
+@@ -539,8 +542,8 @@
        .text_color(this.tab === id ? t.foreground : t.muted).when(this.tab === id, (e) => e.border_b(2).border_color(t.accent)).hover((s) => s.text_color(t.foreground))
        .on_click((_e, cx) => this.setTab(id, cx)).child(label);
      return h_flex().h(34).flex_none().border_b(1).border_color(t.border)
@@ -517,7 +541,7 @@
    }
  
    toolbar(t) {
-@@ -553,37 +553,37 @@
+@@ -553,37 +556,37 @@
          .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => { if (!on) { h.setAll(all); this.refresh(cx); cx.notify(); } }).child(text);
        return h_flex().h(32).flex_none().px(8).gap(6).items_center().border_b(1).border_color(t.border)
          .child(h_flex().p(2).gap(2).rounded(7).border_1().border_color(t.border)
@@ -568,7 +592,7 @@
          onClick: (cx) => this.remote(cx, action.type), onMenu: (cx) => this.remoteMenu(cx),
        })));
    }
-@@ -593,7 +593,7 @@
+@@ -593,7 +596,7 @@
      return div().id("commit-editor").relative().mx(10).min_h(70).px(10).py(8).rounded(8).border_1().border_color(this.typing ? t.accent : t.border).bg(t.background).cursor_text()
        .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.editor.focus(); })
        .when(!this.message, (e) => e.child(div().absolute().top(8).left(10).right(10).truncate().text_size(12).text_color(t.dim)
@@ -577,7 +601,7 @@
        .child(Textarea.new(this.editor).w_full().text_size(12).text_color(t.foreground).font_family("JetBrains Mono"));
    }
  
-@@ -601,13 +601,13 @@
+@@ -601,13 +604,13 @@
      const busy = Boolean(this.busy) || this.loading, mode = this.mode();
      const hasMessage = Boolean(this.message.trim() || this.suggestion());
      const canCommit = !busy && (this.amend ? Boolean(this.last) : hasMessage && (mode === "staged" || mode === "tracked"));
@@ -595,7 +619,7 @@
          .child(div().flex_1())
          .child(this.split("commit", label, t, { primary: true, enabled: canCommit, tip, onClick: (cx) => this.commit(cx, false), onMenu: (cx) => this.commitOptions(cx) })));
    }
-@@ -616,7 +616,7 @@
+@@ -616,7 +619,7 @@
    copyHash(c, cx) {
      cx.write_to_clipboard(c.hash);
      this.copied = c.hash;
@@ -604,7 +628,7 @@
      cx.timer.after(1500, (cx) => { if (this.copied === c.hash) { this.copied = null; cx.notify(); } });
      cx.notify();
    }
-@@ -625,7 +625,7 @@
+@@ -625,7 +628,7 @@
      const done = this.copied === c.hash;
      return h_flex().id(`hash-${c.hash}`).flex_none().h(20).px(5).gap(4).items_center().rounded(5).cursor_pointer()
        .font_family(settings().font_family ?? "JetBrains Mono").text_size(11).text_color(done ? t.ansi2 : t.dim)
@@ -613,7 +637,7 @@
        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
        .on_click((_e, cx) => { cx.stop_propagation(); this.copyHash(c, cx); })
        .child(c.short)
-@@ -639,8 +639,8 @@
+@@ -639,8 +642,8 @@
        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.commitMenu(c, cx); })
        .child(this.hashChip(c, t))
        .child(div().flex_1().min_w(0).truncate().text_color(this.isShown(c) ? t.accent : t.muted).child(c.subject))
@@ -624,7 +648,7 @@
    }
  
    render(cx) {
-@@ -653,7 +653,7 @@
+@@ -653,7 +656,7 @@
      const list = !history && this.root ? this.changesList(t).out : [];
      const graph = history && (this.history.commits.length
        ? this.historyView(t)
@@ -633,7 +657,7 @@
      return v_flex().id("git-changes").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13).track_focus(this.handle)
        .on_size_change((size, cx) => {
          const width = Math.round(size.width / (settings().zoom ?? 1));
-@@ -670,9 +670,9 @@
+@@ -670,9 +673,9 @@
        .when(history, (e) => e.child(v_flex().flex_1().min_h(0).child(graph)))
        .when(!history, (e) => e.child(v_flex().id("git-changes-list").flex_1().min_h(0).overflow_y_scrollbar().p(6)
          .children(list)

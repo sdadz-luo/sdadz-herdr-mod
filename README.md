@@ -10,9 +10,9 @@
 
 | mod                                | 上游                         | 功能                                                                   |
 | ---------------------------------- | ---------------------------- | ---------------------------------------------------------------------- |
-| [files-plus](mods/files-plus/)     | [linziyanleo/herdr-mods]     | 文件树面板：多根工作区、右键菜单、拖拽打开、内置预览、VS Code 风格图标 |
-| [preview-plus](mods/preview-plus/) | [linziyanleo/herdr-mods]     | 文件预览面板：文本、Markdown、图片、PDF，支持编辑保存、缩放、翻页      |
-| [git-changes](mods/git-changes/)   | [aBER0724/herdr-git-changes] | Git 面板：暂存与提交、提交历史图、主区域 diff                          |
+| [files-plus](mods/files-plus/)     | [linziyanleo/herdr-mods]     | 文件树面板：多根工作区、右键菜单、拖拽打开、VS Code 图标；文件交给 preview-plus 编辑 |
+| [preview-plus](mods/preview-plus/) | [linziyanleo/herdr-mods]     | 文件预览与编辑：文本、Markdown、图片、PDF；UTF-8/GBK 保存、语法高亮、缩放、翻页 |
+| [git-changes](mods/git-changes/)   | [aBER0724/herdr-git-changes] | Git 面板：暂存与提交、提交历史图、主区域 diff；本地改动由 watch 驱动   |
 | [tabs-graph](mods/tabs-graph/)     | 无，克隆 Herdr 内置 `tabs`   | 标签栏：Files / Changes 面板开关，每个空间记住上次选择                 |
 
 [linziyanleo/herdr-mods]: https://github.com/linziyanleo/herdr-mods
@@ -41,8 +41,11 @@
 - 整体汉化：界面文字、菜单、错误提示，只改用户可见字符串。
 - Windows 中文环境：中文文件名与路径处理。
 - files-plus：用 `node` 批量读取目录并预取；修复打开文件时的查重与点击
-  丢失；接入 Material Icon Theme 文件图标。
-- preview-plus：删去与 files-plus 重复的文件树。
+  丢失；接入 Material Icon Theme 文件图标；所有文件交给 preview-plus；
+  本地目录树只在 watch 缺失时兜底刷新。
+- preview-plus：删去与 files-plus 重复的文件树；GBK/GB18030 双向编辑；
+  Markdown 默认源码；扩充语法映射；watch 事件去抖。
+- git-changes：本地轮询改为 `watchFolder` 驱动，远程才保留 10 秒轮询。
 - tabs-graph：去掉已废弃的 Git 按钮，加入 Files / Changes 面板开关。
 
 本地修改通过 `patches/` 下的补丁记录。补丁只包含代码差异，不含图标资产

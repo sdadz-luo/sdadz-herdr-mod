@@ -289,6 +289,18 @@ export default class PreviewPlus extends View {
     }
   }
 
+  // One save can emit several watch events; a GBK reload also spawns Python,
+  // so collapse a burst into one read.
+  queueReload(cx) {
+    if (this.reloadTimer) return;
+    const token = this.reloadTimer = {};
+    cx.timer.after(500, cx => {
+      if (this.reloadTimer !== token) return;
+      this.reloadTimer = null;
+      this.reload(cx);
+    });
+  }
+
   watchTargets(files, cx) {
     this.watchedFiles = new Set(files.map(normalize));
     const directories = new Set(files.map(dirname));
@@ -313,7 +325,7 @@ export default class PreviewPlus extends View {
                 const canonical = pathKey(dirname(file) === dir ? `${physical}/${basename(file)}` : file), original = pathKey(file);
                 return original === value || canonical === value || canonical.startsWith(value + "/");
               });
-            })) this.reload(cx);
+            })) this.queueReload(cx);
             pending = watchFolder(dir);
           }
         } catch { if (this.watchers.get(dir) === token) this.watchers.delete(dir); }
@@ -512,7 +524,7 @@ export default class PreviewPlus extends View {
   }
 
   async close() {
-    this.closed = true; this.request = null; this.watchers.clear(); this.releaseEditor(); this.zoomInput.release();
+    this.closed = true; this.request = null; this.watchers.clear(); this.reloadTimer = null; this.releaseEditor(); this.zoomInput.release();
     this.persistDrafts(); await localStorage.flush();
   }
 }
