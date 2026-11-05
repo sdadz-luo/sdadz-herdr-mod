@@ -1,10 +1,16 @@
 # files-plus
 
 Herdr 的文件树面板：文件夹树 / 平铺列表、多根工作区、右键菜单、
-拖拽打开文件、内置文本预览。克隆自 Herdr 自带的 `files` 面板（0.1.9）。
+拖拽打开文件、内置文本预览、VS Code 风格文件图标。克隆自 Herdr 自带的
+`files` 面板（0.1.9）。
 
 ## 本地修改
 
+- **VS Code 风格图标**（`tree.js` 的 `iconFile()`、`icons.js`、`icons/`）：
+  图标表取自 `amster93/herdr-file-icons` 的 Material Icon Theme 5.40.0
+  （MIT，见 `LICENSE-material-icon-theme.txt`），按 VS Code 的规则匹配：
+  路径规则 → 文件名 → 最长扩展名；文件夹按名称匹配，展开时用 open 变体，
+  浅色主题优先用浅色变体。原来固定的 `file.svg` / `folder.svg` 不再使用。
 - **汉化**：界面文字、菜单、错误提示。
 - **Windows 中文文件名修复**：`roots.js` 里的路径归一化处理。
 - **目录读取重构**（`workspace.js`）：

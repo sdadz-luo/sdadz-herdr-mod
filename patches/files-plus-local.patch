@@ -403,7 +403,39 @@
  export async function reloadWorkspace(id) {
 --- a/tree.js
 +++ b/tree.js
-@@ -24,7 +24,7 @@
+@@ -1,6 +1,30 @@
+-import { View, div, svg } from "gpui-kit";
++import { View, div, svg, image } from "gpui-kit";
+ import { v_flex, h_flex } from "gpui-base";
++import { settings } from "herdr";
++import ICONS from "./icons.js";
+ import { joinPath, label, shortPath } from "./roots.js";
++
++// Material Icon Theme 的匹配顺序与 VS Code 一致：路径规则优先于文件名，文件名优先于扩展名，
++// 扩展名取最长匹配（spec.ts 先于 ts）。浅色主题先查主题自带的浅色表。
++const bare = name => name.replace(/^__(.+)__$/, "$1").replace(/^[._-]/, "");
++const opened = id => id.endsWith("_light") ? `${id.slice(0, -6)}-open_light` : `${id}-open`;
++const lookup = (table, key, dark) => (dark ? undefined : ICONS.light[table][key]) ?? ICONS[table][key];
++
++function iconFile(path, dir, open, dark) {
++  // 根目录与工作区路径来自不同来源，统一成 / 再分段，否则 Windows 下整条路径会被当成一个名字。
++  const parts = path.toLowerCase().replace(/\\/g, "/").split("/"), name = parts[parts.length - 1];
++  const table = dir ? "folderNames" : "fileNames";
++  const find = key => lookup(table, key, dark) ?? (dir ? lookup(table, bare(key), dark) : undefined);
++  let id;
++  for (let i = 0; !id && i < parts.length - 1; i++) id = find(parts.slice(i).join("/"));
++  if (dir) {
++    id ??= find(name) ?? ICONS.folder;
++    return `mods/files-plus/icons/${open ? opened(id) : id}.svg`;
++  }
++  id ??= lookup(table, name, dark);
++  for (let dot = name.indexOf("."); !id && dot !== -1; dot = name.indexOf(".", dot + 1)) id = lookup("fileExtensions", name.slice(dot + 1), dark);
++  return `mods/files-plus/icons/${id ?? ICONS.file}.svg`;
++}
+ 
+ export const CHUNK_SIZE = 100;
+ export const FOLDER_MOTION = { duration: 250, easing: "ease-out" };
+@@ -24,7 +48,7 @@
    const walk = (prefix, root, depth) => {
      if (depth > 40) return;
      const list = state.entries.get(prefix);
@@ -412,7 +444,7 @@
      for (const entry of list) {
        const path = joinPath(prefix, entry.name), open = state.folders.has(path);
        out.push({ key: path, id: `file-${path}`, path, root, depth, kind: entry.dir ? "dir" : "file", name: entry.name,
-@@ -39,9 +39,9 @@
+@@ -39,9 +63,9 @@
      if (open && !missing) walk(path, path, 1);
    }
    else if (state.root) walk(state.root, state.root, 0);
@@ -424,7 +456,14 @@
    return out;
  }
  
-@@ -72,7 +72,7 @@
+@@ -66,13 +90,13 @@
+   }
+   render() {
+     const { rows, panel, look } = this.data;
+-    const { colors: t, font } = look, height = 28;
++    const { colors: t, font } = look, height = 28, dark = settings().dark !== false;
+     return v_flex().w_full().min_w(0).font_family(font).text_size(13).text_color(t.foreground).children(rows.map(row => {
+       const entering = this.entering.has(row.key), hidden = entering || row.leaving;
        if (row.kind === "status") return h_flex().id(row.id).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().items_center().pl(8 + row.depth * 18).text_size(12).text_color(row.error ? t.ansi1 : t.muted)
          .when(entering, el => el.on_size_change((_size, cx) => this.reveal(row.key, cx)))
          .opacity(hidden ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
@@ -433,6 +472,15 @@
        const folder = row.kind !== "file";
        return h_flex().id(row.id).w_full().min_w(0).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_default().disabled(Boolean(row.leaving))
          .when(entering, el => el.on_size_change((_size, cx) => this.reveal(row.key, cx)))
+@@ -85,7 +109,7 @@
+         })
+         .on_mouse_down("right", (event, cx) => { if (row.leaving) cx.stop_propagation(); else panel.menu(row.path, row.kind, row.root, event, cx); })
+         .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.muted) : div().w(12).flex_none())
+-        .child(svg(`mods/files-plus/${folder ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
++        .child(image(iconFile(row.path, folder, row.open, dark)).size(16).flex_none())
+         .child(div().min_w(0).truncate().when(!row.detail, el => el.flex_1()).child(row.name))
+         .when(Boolean(row.detail), el => el.child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(row.detail)))
+         .when(Boolean(row.mark), el => el.child(div().text_size(12).text_color(row.mark === "A" ? t.ansi2 : row.mark === "D" || row.mark === "U" ? t.ansi1 : t.ansi3).child(row.mark)));
 --- a/workspace.js
 +++ b/workspace.js
 @@ -13,6 +13,21 @@

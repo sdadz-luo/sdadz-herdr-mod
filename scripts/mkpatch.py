@@ -11,13 +11,16 @@ import io
 import os
 import sys
 
-SKIP = {"RECIPE.md", "preview.png", "gpui-kit.d.ts", "jsconfig.json", "README.md", "AGENTS.md"}
+# 图标资产体积大且版本固定，不进补丁；来源与版本记录在各 mod 的 README。
+SKIP = {"RECIPE.md", "preview.png", "gpui-kit.d.ts", "jsconfig.json", "README.md", "AGENTS.md",
+        "icons.js", "LICENSE-material-icon-theme.txt"}
+SKIP_DIRS = {"icons"}
 
 
 def files(base):
     out = set()
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in (".git", ".cache", "node_modules")]
+        dirnames[:] = [d for d in dirnames if d not in (".git", ".cache", "node_modules", *SKIP_DIRS)]
         for name in filenames:
             if name in SKIP:
                 continue
