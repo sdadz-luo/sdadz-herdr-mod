@@ -29,7 +29,8 @@ const TREE_SCRIPT = [
   "walk(root,depth,'');process.stdout.write(JSON.stringify(out));",
 ].join("");
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
-const RICH = /\.(md|markdown|png|jpe?g|webp|svg|pdf)$/i;
+// preview-plus edits every local text file, not just the rich formats, so the
+// extension no longer decides where a file opens.
 const collator = globalThis.Intl?.Collator ? new globalThis.Intl.Collator() : { compare: (a, b) => a.localeCompare(b) };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -343,7 +344,7 @@ export class FilesPanel extends View {
         notify({ title: "请先在中间区域选择一个分屏", level: "info" });
         return;
       }
-      const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
+      const rich = (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
       if (superseded()) return;
       try {
         const mod = rich ? "preview-plus" : "files-plus";

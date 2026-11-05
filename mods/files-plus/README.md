@@ -25,6 +25,9 @@ Herdr 的文件树面板：文件夹树 / 平铺列表、多根工作区、右�
   - node 不可用或读取失败时回退 PowerShell 单目录读取；远端机器仍用
     `sh` 并轮询，不走预取。
   - 路径始终作为 `node` 的独立参数传入，不拼进命令字符串。
+- **所有文件交给 preview-plus**（`workspace.js` 的 `openFile`）：去掉原来的
+  `RICH` 扩展名限制，`.c`、`.py`、`.json` 等也进 preview-plus 编辑，不再落
+  只读的内置预览。
 - **打开文件前查重**（`open-files.js`）：Windows 上改由 `node` 转发
   `hc connect`，请求以十六进制传参并保持 stdin 到收到回复为止。原实现用
   PowerShell 管道，PowerShell 会把命令行上的 JSON 当脚本重新解析，且 `hc`
@@ -37,13 +40,14 @@ Herdr 的文件树面板：文件夹树 / 平铺列表、多根工作区、右�
 
 ## 预览与编辑范围
 
-打开文件时按扩展名分流：
+装 preview-plus 时，所有文件都交给它打开，不再按扩展名分流；文本类文件
+可以直接编辑保存（详见 preview-plus 的说明）。
 
-- `md`、`markdown`、`png`、`jpg`、`jpeg`、`webp`、`svg`、`pdf`（`workspace.js`
-  的 `RICH`）→ 装了 preview-plus 就交给它，能编辑（详见 preview-plus 的说明）。
-- 其余文件 → 本 mod 自带的内置预览（`role: "preview"` 标签），
-  `EditorState` 固定 `readonly: true`，**只能看不能改**。这是上游设计，
-  不是汉化造成的。
+内置预览（`role: "preview"` 标签，`EditorState` 固定 `readonly: true`）
+只在两种情况下兜底：
+
+- 没有安装 preview-plus；
+- 打开位置设为「在右侧栏内打开」，但没有可用的配对布局。
 
 ## 上游与补丁
 

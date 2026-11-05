@@ -512,7 +512,7 @@
          .when(Boolean(row.mark), el => el.child(div().text_size(12).text_color(row.mark === "A" ? t.ansi2 : row.mark === "D" || row.mark === "U" ? t.ansi1 : t.ansi3).child(row.mark)));
 --- a/workspace.js
 +++ b/workspace.js
-@@ -13,6 +13,21 @@
+@@ -13,8 +13,24 @@
  import { findOpenFile, focusOpenFile } from "./open-files.js";
  
  const PER_FOLDER = 500, TOTAL = 5000;
@@ -532,9 +532,13 @@
 +  "walk(root,depth,'');process.stdout.write(JSON.stringify(out));",
 +].join("");
  const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
- const RICH = /\.(md|markdown|png|jpe?g|webp|svg|pdf)$/i;
+-const RICH = /\.(md|markdown|png|jpe?g|webp|svg|pdf)$/i;
++// preview-plus edits every local text file, not just the rich formats, so the
++// extension no longer decides where a file opens.
  const collator = globalThis.Intl?.Collator ? new globalThis.Intl.Collator() : { compare: (a, b) => a.localeCompare(b) };
-@@ -47,17 +62,27 @@
+ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+ 
+@@ -47,17 +63,27 @@
  
  export async function directory(path, on) {
    if (!on && appWindow().platform === "windows") {
@@ -565,7 +569,7 @@
  }
  
  export class FilesPanel extends View {
-@@ -68,7 +93,7 @@
+@@ -68,7 +94,7 @@
    }
    initPanel(cx) {
      this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
@@ -574,7 +578,7 @@
      this.look = appearance();
      this.lookKey = JSON.stringify(this.look);
      this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
-@@ -123,18 +148,56 @@
+@@ -123,18 +149,56 @@
      });
    }
    current(context, loc = this.location()) { return this.context === context && (this.role === "preview" ? context !== null : loc.key === context); }
@@ -632,7 +636,7 @@
        if (entries !== this.entries || pending.get(path) !== request || !this.current(context) || !this.folders.has(path)) return false;
        const used = this.entryCount - (this.entries.get(path)?.length || 0);
        const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
-@@ -155,7 +218,7 @@
+@@ -155,7 +219,7 @@
      if (context !== this.context) {
        this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
        this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
@@ -641,7 +645,7 @@
        this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
        this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
        this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
-@@ -178,7 +241,7 @@
+@@ -178,7 +242,7 @@
          if (!this.current(context) || generation !== this.generation) return;
          if (!same(roots, this.rootInfo)) this.treeVersion++;
          this.rootInfo = roots;
@@ -650,7 +654,7 @@
          const queue = [...(options.paths || this.folders)], listing = queue.length > 0;
          let readError = null;
          await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
-@@ -222,6 +285,7 @@
+@@ -222,6 +286,7 @@
          if (!same(this.marks, marks)) { this.marks = marks; this.treeVersion++; }
          if (listing) this.error = readError;
          for (const root of roots) if (root.exists) this.watch(root.path, cx);
@@ -658,7 +662,7 @@
          if (this.file) this.show(this.file, cx);
        } catch (error) { if (this.current(context) && generation === this.generation) this.error = error.message || String(error); }
        finally {
-@@ -256,7 +320,7 @@
+@@ -256,7 +321,7 @@
            let completed = false;
            try { completed = await this.loadFolder(path, context); }
            catch (error) { if (this.current(context)) { completed = true; this.error = error.message || String(error); } }
@@ -667,7 +671,7 @@
          });
        }
      }
-@@ -265,22 +329,26 @@
+@@ -265,22 +330,26 @@
    openFile(path, root, cx) {
      this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
      const request = this.openRequest = {};
@@ -686,7 +690,7 @@
 +        notify({ title: "请先在中间区域选择一个分屏", level: "info" });
 +        return;
 +      }
-+      const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
++      const rich = (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
 +      if (superseded()) return;
        try {
 -        const existing = await findOpenFile(path, on, space);
@@ -706,7 +710,7 @@
            if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
            else run("pane.split", { pane, direction: "right", mod, props: previewProps });
          } else if (rich) {
-@@ -288,7 +356,7 @@
+@@ -288,7 +357,7 @@
            run("layout.select", { stack, child: "preview-plus" });
          } else this.show(path, cx);
        } catch {
@@ -715,7 +719,7 @@
        }
        cx.notify();
      });
-@@ -310,12 +378,12 @@
+@@ -310,12 +379,12 @@
          if (text === null || text.includes("\0")) {
            changed = Boolean(this.code);
            this.code?.release(); this.code = null;
@@ -731,7 +735,7 @@
        finally { if (changed && this.previewRequest === request && this.current(context)) cx.notify(); }
      });
    }
-@@ -340,7 +408,7 @@
+@@ -340,7 +409,7 @@
      return v_flex().id("file-viewer").size_full().min_w(0).min_h(0).bg(t.background).text_color(t.foreground).font_family(font).text_size(13)
        .child(div().h(42).px(14).flex().items_center().flex_none().border_b(0.5).border_color(t.border)
          .child(div().truncate().tooltip(this.file).font_semibold().child(basename(this.file))))
@@ -740,7 +744,7 @@
    }
    target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
    menu(path, kind, root, event, cx) {
-@@ -382,7 +450,7 @@
+@@ -382,7 +451,7 @@
      if (lookChanged || chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this, look });
      this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
    }
@@ -749,7 +753,7 @@
    scheduleFit(cx, cause = "background") {
      const fit = props()?.fit;
      if (!fit?.node || this.file) return;
-@@ -446,11 +514,11 @@
+@@ -446,11 +515,11 @@
        .on_mouse_move((event, cx) => dragMove(this, event, cx))
        .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
        .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
@@ -763,7 +767,7 @@
            .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
              if (!add) return;
              const root = entry?.folders[0]?.path || this.root;
-@@ -459,7 +527,7 @@
+@@ -459,7 +528,7 @@
              cx.stop_propagation();
            }).child(svg("mods/files-plus/plus.svg").size(14)))
          .when(Boolean(this.file), el => el.child(div().max_w(140).truncate().text_size(12).text_color(t.dim).tooltip(this.file).child(title)))
@@ -772,7 +776,7 @@
            .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
            .on_click((_event, cx) => {
              cx.stop_propagation();
-@@ -469,7 +537,7 @@
+@@ -469,7 +538,7 @@
        .when(!this.file, el => el.child(this.treeView))
        .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
          .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)

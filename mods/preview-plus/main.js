@@ -1,13 +1,30 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Editor, EditorState, Input, InputState } from "gpui-base";
-import { props, shared, spaces, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
+import { props, shared, spaces, focused, run, readTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
 import { target, dirname, basename, extension, kind, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { loadMedia, openFile } from "./media.js";
 import { stageMarkdown } from "./markdown.js";
+import { readDocumentText, writeDocumentText, UTF8 } from "./encoding.js";
 
 const TEXT_LIMIT = 400000;
-const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
+// Names below come from the syntaxes embedded in Herdr (syntect's default set).
+// Extensions it does not ship are left as-is and render as plain text.
+const LANGUAGE = {
+  md: "markdown", markdown: "markdown",
+  ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js",
+  toml: "yaml", jsonc: "json", svelte: "html", vue: "html",
+  yml: "yaml", htm: "html", h: "c",
+  hpp: "cpp", hh: "cpp", hxx: "cpp", cc: "cpp", cp: "cpp", cxx: "cpp", "c++": "cpp",
+  svg: "xml", scss: "css", sass: "css", less: "css",
+  dts: "c", dtsi: "c", ld: "c", lds: "c",
+  ini: "properties", conf: "properties", cfg: "properties",
+};
+const MAKEFILE = new Set(["makefile", "gnumakefile"]);
+function languageFor(file) {
+  if (MAKEFILE.has(basename(file).toLowerCase())) return "Makefile";
+  return LANGUAGE[extension(file)] || extension(file);
+}
 
 // files-plus owns the file tree; this panel only shows what it hands over: a file
 // prop (a tab or split) or the shared target of the paired stack.
@@ -47,7 +64,7 @@ export default class PreviewPlus extends View {
     try {
       for (const draft of JSON.parse(localStorage.getItem("preview-plus.drafts") || "[]")) {
         if (typeof draft.file === "string" && typeof draft.base === "string" && typeof draft.text === "string")
-          this.documents.set(draft.file, { ...draft, saving: false });
+          this.documents.set(draft.file, { ...draft, saving: false, encoding: draft.encoding || UTF8 });
       }
     } catch { this.draftError = "无法读取已保存的草稿。"; }
     this.history = []; this.watchers = new Map(); this.watchedFiles = new Set();
@@ -93,9 +110,9 @@ export default class PreviewPlus extends View {
   releaseEditor() { this.code?.release(); this.code = null; this.codeStyle = null; }
 
   updateEditor() {
-    const style = sourceStyle(), ext = extension(this.selected.file);
+    const style = sourceStyle();
     this.releaseEditor();
-    const code = this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: !this.document, soft_wrap: this.wrap, value: this.text, ...style });
+    const code = this.code = EditorState.new({ language: languageFor(this.selected.file), readonly: !this.document, soft_wrap: this.wrap, value: this.text, ...style });
     code.on("change", (_event, cx) => this.editorChanged(code, cx));
     this.codeStyle = JSON.stringify(style);
   }
@@ -111,7 +128,7 @@ export default class PreviewPlus extends View {
   persistDrafts() {
     try {
       const drafts = [...this.documents.values()].filter(doc => this.dirty(doc) || doc.saving)
-        .map(doc => ({ file: doc.file, base: doc.base, text: doc.text }));
+        .map(doc => ({ file: doc.file, base: doc.base, text: doc.text, encoding: doc.encoding || UTF8 }));
       if (drafts.length) localStorage.setItem("preview-plus.drafts", JSON.stringify(drafts));
       else localStorage.removeItem("preview-plus.drafts");
       this.draftError = null;
@@ -153,9 +170,12 @@ export default class PreviewPlus extends View {
     doc.saving = true; doc.saveError = null; this.confirmDiscard = false; this.persistDrafts(); cx.notify();
     cx.spawn(async cx => {
       try {
-        await writeTextFile(doc.file, text, expected);
+        await writeDocumentText(doc.file, text, expected, doc.encoding || UTF8);
         doc.base = text; doc.external = false;
-      } catch (error) { doc.saveError = `保存失败：${String(error.message || error)}。草稿已保留。`; }
+      } catch (error) {
+        if (error.code === "conflict") doc.external = true;
+        doc.saveError = `保存失败：${String(error.message || error)}。草稿已保留。`;
+      }
       finally {
         doc.saving = false; this.persistDrafts();
         if (!this.closed) cx.notify();
@@ -179,7 +199,7 @@ export default class PreviewPlus extends View {
     const next = target(value);
     if (!next) return;
     if (remember && this.selected) this.history.push({ target: this.selected, source: this.source, zoom: this.zoom, page: this.page });
-    this.selected = next; this.source = false; this.zoom = null; this.page = 1; this.total = 0;
+    this.selected = next; this.source = kind(next.file) === "markdown"; this.zoom = null; this.page = 1; this.total = 0;
     this.load(cx, notify);
   }
 
@@ -199,24 +219,29 @@ export default class PreviewPlus extends View {
           this.media = media; this.page = media.page; this.total = media.pages;
         } else {
           const draft = !selected.on && this.documents.get(selected.file);
-          let value;
-          try { value = await readTextFile(selected.file, { on: selected.on }); }
-          catch (error) { if (!draft || !this.dirty(draft)) throw error; value = null; }
+          let read = null;
+          try {
+            read = selected.on
+              ? { text: await readTextFile(selected.file, { on: selected.on }), encoding: UTF8 }
+              : await readDocumentText(selected.file);
+          }
+          catch (error) { if (!draft || !this.dirty(draft)) throw error; read = null; }
           if (!this.current(request)) return;
           if (draft && (this.dirty(draft) || draft.saving)) {
-            this.document = draft; draft.external = value !== draft.base;
+            this.document = draft; draft.external = !read || read.text !== draft.base;
             this.text = draft.text; this.truncated = false;
           } else {
-            if (value === null) throw new Error("此文件已不可用。");
+            if (read === null) throw new Error("此文件已不可用。");
+            const value = read.text;
             if (value.includes("\0")) throw new Error("二进制文件没有文本预览。");
             this.truncated = value.length > TEXT_LIMIT;
             this.text = this.truncated ? value.slice(0, TEXT_LIMIT) + "\n\n… (file truncated)" : value;
             if (!selected.on && !this.truncated) {
-              this.document = { file: selected.file, base: value, text: value };
+              this.document = { file: selected.file, base: value, text: value, encoding: read.encoding };
               this.documents.set(selected.file, this.document);
             }
           }
-          if (type === "markdown") {
+          if (type === "markdown" && !this.source) {
             const staged = await stageMarkdown(this.text, selected);
             if (!this.current(request)) return;
             this.markdownBlocks = staged.blocks; this.imageWarning = staged.unavailable;
@@ -243,7 +268,7 @@ export default class PreviewPlus extends View {
         const doc = this.document, request = this.request;
         cx.spawn(async cx => {
           try {
-            const disk = await readTextFile(doc.file);
+            const disk = (await readDocumentText(doc.file))?.text ?? null;
             if (!this.current(request) || this.document !== doc) return;
             if (!this.dirty(doc) && !doc.saving && disk !== doc.base) { this.load(cx); return; }
             doc.external = disk !== doc.base;
@@ -412,6 +437,8 @@ export default class PreviewPlus extends View {
       .child(h_flex().id("preview-toolbar").h(42).flex_none().px(8).gap(2).items_center().border_b(0.5).border_color(colors.border)
         .when(Boolean(file) && panelFrame, el => el.child(button("preview-back", "←", colors, cx => this.back(cx))))
         .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().when(Boolean(file), el => el.tooltip(file)).child(file ? basename(file) : "文件"))
+        .when(Boolean(this.document?.encoding) && this.document.encoding !== UTF8, el => el
+          .child(div().px(4).text_size(11).text_color(colors.dim).tooltip("文件编码").accessibility_label(`编码 ${this.document.encoding}`).child(this.document.encoding.toUpperCase())))
         .when(this.dirty() || Boolean(this.document?.saving), el => el.child(div().id("preview-dirty").size(6).mr(4).flex_none().rounded_full().bg(colors.muted)
           .tooltip(this.document?.saving ? "正在保存…" : "未保存的修改").accessibility_label(this.document?.saving ? "Saving" : "未保存的修改")))
         .when(Boolean(this.code) && !this.document, el => el.child(div().size(16).flex_none().flex().items_center().justify_center().text_color(colors.dim)
