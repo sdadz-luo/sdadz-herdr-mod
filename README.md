@@ -1,102 +1,85 @@
-# herdr-mods：Herdr 第三方 mod 仓库
+# sdadz-herdr-mod
 
-Herdr 只从 app home 加载 mod，所以这里保存源码与备份，装好后复制过去。
-不保留上游仓库副本；需要更新时临时 clone，用完删掉。
+个人使用的 [Herdr](https://herdr.dev) 第三方 mod 远端备份。代码来自各 mod
+的上游项目，加上本人针对 Windows 中文环境和日常使用所做的本地修改。
 
-## 两个位置
+这不是 Herdr 官方项目，也不保证与未来 Herdr 版本兼容。需要某个 mod 时，
+请优先使用它的上游仓库。
 
-| 用途 | 路径 |
-| --- | --- |
-| 运行位置（Herdr 唯一加载处） | `C:\Users\25530\.config\herdr-app\mods\<name>\` |
-| 保存位置（唯一事实源） | `D:\project\herdr-mods\mods\<name>\` |
+## 包含的 mod
 
-以后装新 mod 的固定流程：
+| mod                                | 上游                         | 功能                                                                   |
+| ---------------------------------- | ---------------------------- | ---------------------------------------------------------------------- |
+| [files-plus](mods/files-plus/)     | [linziyanleo/herdr-mods]     | 文件树面板：多根工作区、右键菜单、拖拽打开、内置预览、VS Code 风格图标 |
+| [preview-plus](mods/preview-plus/) | [linziyanleo/herdr-mods]     | 文件预览面板：文本、Markdown、图片、PDF，支持编辑保存、缩放、翻页      |
+| [git-changes](mods/git-changes/)   | [aBER0724/herdr-git-changes] | Git 面板：暂存与提交、提交历史图、主区域 diff                          |
+| [tabs-graph](mods/tabs-graph/)     | 无，克隆 Herdr 内置 `tabs`   | 标签栏：Files / Changes 面板开关，每个空间记住上次选择                 |
 
-1. 把 mod 文件夹放进 `mods\<name>\`。
-2. 复制到 app home 的 `mods\<name>\`。
-3. 跑 `herdr-app check`。
-4. 在这里提交一次。
+[linziyanleo/herdr-mods]: https://github.com/linziyanleo/herdr-mods
+[aBER0724/herdr-git-changes]: https://github.com/aBER0724/herdr-git-changes
 
-## 目录
+## 目录结构
 
 ```text
-herdr-mods/
+.
 ├── mods/
-│   ├── files-plus/      本地修改：汉化、中文文件名修复、node 列目录与预取
-│   ├── preview-plus/    本地修改：同上
-│   ├── git-changes/     本地修改：整体汉化（替代自带 changes 面板）
-│   └── tabs-graph/      克隆自带 tabs，去掉已删除的 Git 按钮
-└── patches/
-    ├── files-plus-local.patch
-    ├── preview-plus-local.patch
-    └── git-changes-local.patch
+│   ├── files-plus/
+│   ├── preview-plus/
+│   ├── git-changes/
+│   └── tabs-graph/
+├── patches/            本地修改相对上游的补丁
+├── scripts/mkpatch.py  从上游副本生成本地补丁
+└── AGENTS.md           给 AI 助手的工作区说明
 ```
 
-`gpui-kit.d.ts` 与 `jsconfig.json` 由 Herdr 生成，不入库。
-`tabs-graph` 克隆的是 Herdr 自带 mod，没有独立上游，所以没有补丁。
-`git-graph` 已删除，其功能由 `git-changes` 的 History 页覆盖。
+`gpui-kit.d.ts` 和 `jsconfig.json` 由 Herdr 生成，不入库。
+
+## 本地修改
+
+四个 mod 都以上游为基准，本地修改集中在：
+
+- 整体汉化：界面文字、菜单、错误提示，只改用户可见字符串。
+- Windows 中文环境：中文文件名与路径处理。
+- files-plus：用 `node` 批量读取目录并预取；修复打开文件时的查重与点击
+  丢失；接入 Material Icon Theme 文件图标。
+- preview-plus：删去与 files-plus 重复的文件树。
+- tabs-graph：去掉已废弃的 Git 按钮，加入 Files / Changes 面板开关。
+
+本地修改通过 `patches/` 下的补丁记录。补丁只包含代码差异，不含图标资产
+（体积大且版本固定）。补丁冲突时按 `git apply` 的提示手动合并，再用
+`scripts/mkpatch.py` 重新生成，不要手改补丁。
+
+## 安装
+
+把 mod 复制到 Herdr 的 app home，然后跑检查：
+
+```bash
+cp -a mods/files-plus/. ~/.config/herdr-app/mods/files-plus/
+herdr-app check ~/.config/herdr-app/mods/files-plus
+```
+
+Windows 的 app home 是 `C:/Users/<用户名>/.config/herdr-app`。布局按 mod
+名字引用，覆盖 mod 文件后不需要改布局。
 
 ## 更新上游
 
-补丁基于 `linziyanleo/herdr-mods` 的 `92cef9f`（2026-11-04）。
-上游变了就临时 clone，覆盖后再应用补丁：
+临时克隆上游，覆盖 mod 目录，再应用补丁：
 
-```sh
+```bash
 git clone --depth 1 https://github.com/linziyanleo/herdr-mods.git .tmp/herdr-mods
-
 cp -a .tmp/herdr-mods/files-plus/mods/files-plus/. mods/files-plus/
-cp -a .tmp/herdr-mods/preview-plus/mods/preview-plus/. mods/preview-plus/
-
 (cd mods/files-plus && git apply ../../patches/files-plus-local.patch)
-(cd mods/preview-plus && git apply ../../patches/preview-plus-local.patch)
-
 rm -rf .tmp
 ```
 
-git-changes 同样有本地汉化，更新时覆盖后打补丁：
+git-changes 的上游是
+`https://github.com/aBER0724/herdr-git-changes.git`，流程相同。
 
-```sh
-git clone --depth 1 https://github.com/aBER0724/herdr-git-changes.git .tmp/git-changes
-cp -a .tmp/git-changes/mods/git-changes/. mods/git-changes/
-(cd mods/git-changes && git apply ../../patches/git-changes-local.patch)
-rm -rf .tmp
-```
+## 许可与来源
 
-补丁冲突时按 `git apply` 的提示手动合并，然后重新生成：
+- files-plus、preview-plus、tabs-graph 基于 Herdr 内置 mod（Apache-2.0）。
+- git-changes 来自 aBER0724/herdr-git-changes，许可见其上游仓库。
+- 文件图标来自 Material Icon Theme 5.40.0（MIT），许可见
+  `mods/files-plus/LICENSE-material-icon-theme.txt`。
 
-```sh
-git clone --depth 1 https://github.com/linziyanleo/herdr-mods.git .tmp/herdr-mods
-python scripts/mkpatch.py .tmp/herdr-mods/files-plus/mods/files-plus mods/files-plus patches/files-plus-local.patch
-python scripts/mkpatch.py .tmp/herdr-mods/preview-plus/mods/preview-plus mods/preview-plus patches/preview-plus-local.patch
-
-git clone --depth 1 https://github.com/aBER0724/herdr-git-changes.git .tmp/git-changes
-python scripts/mkpatch.py .tmp/git-changes/mods/git-changes mods/git-changes patches/git-changes-local.patch
-rm -rf .tmp
-```
-
-## 复制到 Herdr
-
-```sh
-cp -a mods/files-plus/.   "C:/Users/25530/.config/herdr-app/mods/files-plus/"
-cp -a mods/preview-plus/. "C:/Users/25530/.config/herdr-app/mods/preview-plus/"
-cp -a mods/git-changes/.  "C:/Users/25530/.config/herdr-app/mods/git-changes/"
-cp -a mods/tabs-graph/.   "C:/Users/25530/.config/herdr-app/mods/tabs-graph/"
-
-herdr-app check "C:/Users/25530/.config/herdr-app/mods/files-plus"
-herdr-app check "C:/Users/25530/.config/herdr-app/mods/preview-plus"
-herdr-app check "C:/Users/25530/.config/herdr-app/mods/git-changes"
-herdr-app check "C:/Users/25530/.config/herdr-app/mods/tabs-graph"
-```
-
-布局 `layouts/main-plus.json` 按名字引用这些 mod，覆盖文件后不用改布局。
-
-## 可选：用 junction 省掉复制
-
-如果不想每次复制，可以把 app home 的 mod 目录做成指向仓库的 junction：
-
-```powershell
-cmd /c rmdir "$env:USERPROFILE\.config\herdr-app\mods\files-plus"
-New-Item -ItemType Junction -Path "$env:USERPROFILE\.config\herdr-app\mods\files-plus" -Target "D:\project\herdr-mods\mods\files-plus"
-```
-
-代价是仓库目录必须一直在 D 盘，删掉仓库 Herdr 也会失去这个 mod。
+各 mod 的详细说明见其目录下的 `README.md`。
