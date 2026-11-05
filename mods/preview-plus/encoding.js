@@ -18,7 +18,10 @@ else:
         try:
             text, encoding = raw.decode('gbk'), 'gbk'
         except UnicodeDecodeError:
-            text, encoding = raw.decode('gb18030'), 'gb18030'
+            try:
+                text, encoding = raw.decode('gb18030'), 'gb18030'
+            except UnicodeDecodeError:
+                text, encoding = None, None
 sys.stdout.buffer.write(json.dumps({'text': text, 'encoding': encoding}, ensure_ascii=False).encode('utf-8'))
 `;
 
@@ -67,18 +70,26 @@ export async function readDocumentText(file) {
   catch (error) { nativeError = error; }
   if (native === null && !nativeError) return null;
   if (native !== null && !native.includes("�") && !native.startsWith("﻿")) return { text: native, encoding: UTF8 };
+  let result;
   try {
-    const result = await exec(python(), ["-c", PYTHON_READ, file]);
-    if (result.code !== 0) throw new Error(result.stderr.trim() || "无法读取文件。");
-    const value = JSON.parse(result.stdout);
-    if (typeof value.text !== "string" || typeof value.encoding !== "string") throw new Error("编码探测返回了无效数据。");
-    return value;
+    result = await exec(python(), ["-c", PYTHON_READ, file]);
   } catch (error) {
     // Without Python the old behaviour is the least surprising fallback: the
     // native text stays visible (replacement characters included).
     if (native !== null) return { text: native, encoding: UTF8 };
     throw new Error(`无法读取此文件：${error.message || error}`);
   }
+  if (result.code !== 0) {
+    if (native !== null) return { text: native, encoding: UTF8 };
+    const detail = (result.stderr || "").trim().split("\n").filter(Boolean).pop() || "无法读取文件。";
+    throw new Error(`无法读取此文件：${detail}`);
+  }
+  const value = JSON.parse(result.stdout);
+  // None means every candidate codec rejected the bytes: show a binary-file
+  // message instead of a decoder traceback.
+  if (value.text === null) throw new Error("二进制文件没有文本预览。");
+  if (typeof value.text !== "string" || typeof value.encoding !== "string") throw new Error("编码探测返回了无效数据。");
+  return value;
 }
 
 export async function writeDocumentText(file, text, expected, encoding) {
