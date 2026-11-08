@@ -2,7 +2,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify } from "herdr";
-import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
+import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, pathKey, READ } from "./roots.js";
 import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
@@ -36,6 +36,11 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 export function changedDirectories(paths, roots, expanded) {
   const directories = new Set(); let git = false;
+  // `expanded` 存的是 joinPath 拼出的写法，dirname() 的结果统一成 /：直接 has() 会
+  // 漏掉全部变更。按归一后的 key 找回原写法，让刷新队列拿到 folders 里真正的键。
+  const stored = new Map();
+  for (const folder of expanded) stored.set(pathKey(folder), folder);
+  const add = path => { const folder = stored.get(pathKey(path)); if (folder !== undefined) directories.add(folder); };
   for (const source of paths) for (const root of roots) {
     const base = [root.path, root.physical].filter(Boolean).find(path => contains(path, source));
     if (!base) continue;
@@ -45,8 +50,8 @@ export function changedDirectories(paths, roots, expanded) {
       continue;
     }
     git = true;
-    if (expanded.has(dirname(path))) directories.add(dirname(path));
-    if (expanded.has(path)) directories.add(path);
+    add(dirname(path));
+    add(path);
   }
   return { paths: directories, git };
 }
@@ -100,7 +105,10 @@ export class FilesPanel extends View {
     this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
     this.revision = shared(REVISION);
     this.refresh(cx);
-    cx.timer.every(10000, cx => { if (this.on) this.refresh(cx); });
+    // Herdr 的 watchFolder 会静默失效（实测热重载过 mod 之后就不再回调），
+    // 而 watches 里仍有记录，5 分钟兜底会因"已有 watch"跳过。可见时按自带
+    // files mod 的节奏每 10 秒重读已展开目录，保证外部改动最终可见。
+    cx.timer.every(10000, cx => { if (this.on || this.visible !== false) this.refresh(cx); });
     cx.timer.every(300000, cx => {
       if (this.on || this.visible === false) return;
       const roots = this.rootInfo || [];
@@ -195,12 +203,14 @@ export class FilesPanel extends View {
     const context = this.context;
     cx.spawn(async () => { if (this.context === context) await this.readTree(path).catch(() => null); });
   }
-  async loadFolder(path, context) {
+  async loadFolder(path, context, reusePrefetch = true) {
     if (!this.current(context) || !this.folders.has(path)) return false;
     const entries = this.entries, pending = this.pending, request = {};
     pending.set(path, request);
     try {
-      let list = this.takePrefetched(path);
+      // 预取只服务下一次展开；watch 点名要刷新的目录必须重新读取，否则刚移入的文件
+      // 会被 10 秒内的旧列表盖掉，且不会再有事件来纠正。
+      let list = reusePrefetch ? this.takePrefetched(path) : null;
       if (!list) {
         list = await this.readTree(path).catch(() => null);
         if (!this.current(context) || !this.folders.has(path)) return false;
@@ -211,7 +221,7 @@ export class FilesPanel extends View {
       const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
       if (!same(this.entries.get(path), next)) { this.entries.set(path, next); this.entryCount = used + next.length; this.treeVersion++; }
       if (list.length > next.length) this.limits.add(path); else this.limits.delete(path);
-      for (const child of [...this.folders]) if (child !== path && dirname(child) === path && !next.some(entry => entry.dir && joinPath(path, entry.name) === child)) {
+      for (const child of [...this.folders]) if (child !== path && pathKey(dirname(child)) === pathKey(path) && !next.some(entry => entry.dir && joinPath(path, entry.name) === child)) {
         for (const folder of [...this.folders]) if (contains(child, folder)) { this.folders.delete(folder); this.dropFolder(folder); }
       }
       this.limited = this.limits.size > 0;
@@ -257,7 +267,7 @@ export class FilesPanel extends View {
             const path = queue.shift(), root = rootOf(path, roots);
             if (!this.folders.has(path)) continue;
             if (!root || root.exists === false) { this.dropFolder(path); continue; }
-            try { await this.loadFolder(path, context); }
+            try { await this.loadFolder(path, context, !options.paths); }
             catch (error) {
               if (generation !== this.generation) return;
               if (this.dropFolder(path)) this.treeVersion++;

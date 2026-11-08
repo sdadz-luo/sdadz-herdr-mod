@@ -25,11 +25,19 @@ Herdr 的文件树面板：文件夹树 / 平铺列表、多根工作区、右�
   - node 不可用或读取失败时回退 PowerShell 单目录读取；远端机器仍用
     `sh` 并轮询，不走预取。
   - 路径始终作为 `node` 的独立参数传入，不拼进命令字符串。
+- **watch 变更的路径匹配**（`roots.js` 的 `pathKey()`、`workspace.js` 的
+  `changedDirectories`）：herdr 交来的根路径在 Windows 下是反斜杠，`joinPath`
+  拼出的子目录混用 `/`，`dirname()` 又统一成 `/`，直接比较会让 watch 报来的
+  变更匹配不到任何已展开目录——外部移入文件后侧边栏不更新。现在比较前按归一
+  后的键找回原路径（Windows 忽略大小写）。watch 点名要刷新的目录也不再使用
+  一次性预取，避免旧列表盖掉刚发生的变更。
 - **所有文件交给 preview-plus**（`workspace.js` 的 `openFile`）：去掉原来的
   `RICH` 扩展名限制，`.c`、`.py`、`.json` 等也进 preview-plus 编辑，不再落
   只读的内置预览。
-- **降低后台刷新**：本地目录树的兜底刷新改为 5 分钟，且只在某个根目录没有
-  watch 时才执行；内置只读预览改由 `watchFolder` 驱动，不再每 10 秒重读。
+- **降低后台刷新**：本地目录树的兜底刷新在面板可见时每 10 秒一次，隐藏时
+  每 5 分钟一次；内置只读预览改由 `watchFolder` 驱动，不再每 10 秒重读。
+  watch 只是即时通道：实测 Herdr 的 `watchFolder` 在 mod 热重载过后会静默
+  失效，而 `watches` 里仍有记录，所以不能把它当作唯一刷新来源。
 - **打开文件前查重**（`open-files.js`）：Windows 上改由 `node` 转发
   `hc connect`，请求以十六进制传参并保持 stdin 到收到回复为止。原实现用
   PowerShell 管道，PowerShell 会把命令行上的 JSON 当脚本重新解析，且 `hc`

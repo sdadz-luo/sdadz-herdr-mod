@@ -11,6 +11,12 @@ export const contains = (root, path) => {
   const r = slashes(root).replace(/\/$/, ""), p = slashes(path);
   return p === r || p.startsWith(r + "/");
 };
+// herdr 交来的根路径在 Windows 下是反斜杠，joinPath 拼出的子目录混用 /，dirname 又
+// 统一成 /：同一个文件夹会有不同写法。比较或查表前先归一；Windows 路径不分大小写。
+export const pathKey = path => {
+  const key = slashes(path).replace(/\/+$/, "");
+  return window()?.platform === "windows" ? key.toLowerCase() : key;
+};
 export const shortPath = path => path === home() ? "~" : path.startsWith(home() + "/") ? "~" + path.slice(home().length) : path;
 
 export function resolvePath(base, path) {

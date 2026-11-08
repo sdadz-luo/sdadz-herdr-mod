@@ -395,7 +395,20 @@
  export function openLocation(value) {
 --- a/roots.js
 +++ b/roots.js
-@@ -45,19 +45,19 @@
+@@ -10,6 +10,12 @@
+ export const contains = (root, path) => {
+   const r = slashes(root).replace(/\/$/, ""), p = slashes(path);
+   return p === r || p.startsWith(r + "/");
++};
++// herdr 交来的根路径在 Windows 下是反斜杠，joinPath 拼出的子目录混用 /，dirname 又
++// 统一成 /：同一个文件夹会有不同写法。比较或查表前先归一；Windows 路径不分大小写。
++export const pathKey = path => {
++  const key = slashes(path).replace(/\/+$/, "");
++  return window()?.platform === "windows" ? key.toLowerCase() : key;
+ };
+ export const shortPath = path => path === home() ? "~" : path.startsWith(home() + "/") ? "~" + path.slice(home().length) : path;
+ 
+@@ -45,19 +51,19 @@
  
  export function parseConfig(text, file) {
    let raw;
@@ -420,7 +433,7 @@
    return { name: raw.name || basename(file).replace(/\.herdr-workspace\.json$/, ""), folders, raw };
  }
  
-@@ -77,7 +77,7 @@
+@@ -77,7 +83,7 @@
  }
  export async function loadConfig(file) {
    const text = await readTextFile(file);
@@ -511,7 +524,16 @@
          .when(Boolean(row.mark), el => el.child(div().text_size(12).text_color(row.mark === "A" ? t.ansi2 : row.mark === "D" || row.mark === "U" ? t.ansi1 : t.ansi3).child(row.mark)));
 --- a/workspace.js
 +++ b/workspace.js
-@@ -13,8 +13,24 @@
+@@ -2,7 +2,7 @@
+ import { View, div, svg } from "gpui-kit";
+ import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
+ import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify } from "herdr";
+-import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
++import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, pathKey, READ } from "./roots.js";
+ import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
+ import { appearance, sourceStyle } from "./appearance.js";
+ import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
+@@ -13,13 +13,34 @@
  import { findOpenFile, focusOpenFile } from "./open-files.js";
  
  const PER_FOLDER = 500, TOTAL = 5000;
@@ -537,7 +559,28 @@
  const collator = globalThis.Intl?.Collator ? new globalThis.Intl.Collator() : { compare: (a, b) => a.localeCompare(b) };
  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  
-@@ -47,17 +63,27 @@
+ export function changedDirectories(paths, roots, expanded) {
+   const directories = new Set(); let git = false;
++  // `expanded` 存的是 joinPath 拼出的写法，dirname() 的结果统一成 /：直接 has() 会
++  // 漏掉全部变更。按归一后的 key 找回原写法，让刷新队列拿到 folders 里真正的键。
++  const stored = new Map();
++  for (const folder of expanded) stored.set(pathKey(folder), folder);
++  const add = path => { const folder = stored.get(pathKey(path)); if (folder !== undefined) directories.add(folder); };
+   for (const source of paths) for (const root of roots) {
+     const base = [root.path, root.physical].filter(Boolean).find(path => contains(path, source));
+     if (!base) continue;
+@@ -29,8 +50,8 @@
+       continue;
+     }
+     git = true;
+-    if (expanded.has(dirname(path))) directories.add(dirname(path));
+-    if (expanded.has(path)) directories.add(path);
++    add(dirname(path));
++    add(path);
+   }
+   return { paths: directories, git };
+ }
+@@ -47,17 +68,27 @@
  
  export async function directory(path, on) {
    if (!on && appWindow().platform === "windows") {
@@ -568,7 +611,7 @@
  }
  
  export class FilesPanel extends View {
-@@ -68,14 +94,21 @@
+@@ -68,14 +99,24 @@
    }
    initPanel(cx) {
      this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
@@ -579,8 +622,12 @@
      this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
      this.revision = shared(REVISION);
      this.refresh(cx);
-     cx.timer.every(10000, cx => { if (this.on) this.refresh(cx); });
+-    cx.timer.every(10000, cx => { if (this.on) this.refresh(cx); });
 -    cx.timer.every(60000, cx => { if (!this.on && this.visible !== false) this.refresh(cx, { recover: true }); });
++    // Herdr 的 watchFolder 会静默失效（实测热重载过 mod 之后就不再回调），
++    // 而 watches 里仍有记录，5 分钟兜底会因"已有 watch"跳过。可见时按自带
++    // files mod 的节奏每 10 秒重读已展开目录，保证外部改动最终可见。
++    cx.timer.every(10000, cx => { if (this.on || this.visible !== false) this.refresh(cx); });
 +    cx.timer.every(300000, cx => {
 +      if (this.on || this.visible === false) return;
 +      const roots = this.rootInfo || [];
@@ -592,7 +639,7 @@
    }
    watch(path, cx) {
      if (this.on || this.watches.has(path)) return;
-@@ -123,18 +156,56 @@
+@@ -123,24 +164,64 @@
      });
    }
    current(context, loc = this.location()) { return this.context === context && (this.role === "preview" ? context !== null : loc.key === context); }
@@ -609,7 +656,8 @@
      this.pending.delete(path); this.limited = this.limits.size > 0;
 +    this.prefetched.delete(path);
      return removed || limited;
-+  }
+   }
+-  async loadFolder(path, context) {
 +  // Read this folder and its first subfolders in one node call. The folder's
 +  // own listing is returned; the subfolders wait in `prefetched` for their expand.
 +  async readTree(path) {
@@ -634,14 +682,16 @@
 +    if (!dirs.length || dirs.some(entry => this.prefetched.has(joinPath(path, entry.name)))) return;
 +    const context = this.context;
 +    cx.spawn(async () => { if (this.context === context) await this.readTree(path).catch(() => null); });
-   }
-   async loadFolder(path, context) {
++  }
++  async loadFolder(path, context, reusePrefetch = true) {
      if (!this.current(context) || !this.folders.has(path)) return false;
      const entries = this.entries, pending = this.pending, request = {};
      pending.set(path, request);
      try {
 -      const list = await directory(path, this.on);
-+      let list = this.takePrefetched(path);
++      // 预取只服务下一次展开；watch 点名要刷新的目录必须重新读取，否则刚移入的文件
++      // 会被 10 秒内的旧列表盖掉，且不会再有事件来纠正。
++      let list = reusePrefetch ? this.takePrefetched(path) : null;
 +      if (!list) {
 +        list = await this.readTree(path).catch(() => null);
 +        if (!this.current(context) || !this.folders.has(path)) return false;
@@ -650,7 +700,14 @@
        if (entries !== this.entries || pending.get(path) !== request || !this.current(context) || !this.folders.has(path)) return false;
        const used = this.entryCount - (this.entries.get(path)?.length || 0);
        const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
-@@ -155,7 +226,7 @@
+       if (!same(this.entries.get(path), next)) { this.entries.set(path, next); this.entryCount = used + next.length; this.treeVersion++; }
+       if (list.length > next.length) this.limits.add(path); else this.limits.delete(path);
+-      for (const child of [...this.folders]) if (child !== path && dirname(child) === path && !next.some(entry => entry.dir && joinPath(path, entry.name) === child)) {
++      for (const child of [...this.folders]) if (child !== path && pathKey(dirname(child)) === pathKey(path) && !next.some(entry => entry.dir && joinPath(path, entry.name) === child)) {
+         for (const folder of [...this.folders]) if (contains(child, folder)) { this.folders.delete(folder); this.dropFolder(folder); }
+       }
+       this.limited = this.limits.size > 0;
+@@ -155,7 +236,7 @@
      if (context !== this.context) {
        this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
        this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
@@ -659,7 +716,7 @@
        this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
        this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
        this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
-@@ -178,7 +249,7 @@
+@@ -178,7 +259,7 @@
          if (!this.current(context) || generation !== this.generation) return;
          if (!same(roots, this.rootInfo)) this.treeVersion++;
          this.rootInfo = roots;
@@ -668,7 +725,16 @@
          const queue = [...(options.paths || this.folders)], listing = queue.length > 0;
          let readError = null;
          await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
-@@ -222,6 +293,7 @@
+@@ -186,7 +267,7 @@
+             const path = queue.shift(), root = rootOf(path, roots);
+             if (!this.folders.has(path)) continue;
+             if (!root || root.exists === false) { this.dropFolder(path); continue; }
+-            try { await this.loadFolder(path, context); }
++            try { await this.loadFolder(path, context, !options.paths); }
+             catch (error) {
+               if (generation !== this.generation) return;
+               if (this.dropFolder(path)) this.treeVersion++;
+@@ -222,6 +303,7 @@
          if (!same(this.marks, marks)) { this.marks = marks; this.treeVersion++; }
          if (listing) this.error = readError;
          for (const root of roots) if (root.exists) this.watch(root.path, cx);
@@ -676,7 +742,7 @@
          if (this.file) this.show(this.file, cx);
        } catch (error) { if (this.current(context) && generation === this.generation) this.error = error.message || String(error); }
        finally {
-@@ -256,7 +328,7 @@
+@@ -256,7 +338,7 @@
            let completed = false;
            try { completed = await this.loadFolder(path, context); }
            catch (error) { if (this.current(context)) { completed = true; this.error = error.message || String(error); } }
@@ -685,7 +751,7 @@
          });
        }
      }
-@@ -265,22 +337,26 @@
+@@ -265,22 +347,26 @@
    openFile(path, root, cx) {
      this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
      const request = this.openRequest = {};
@@ -724,7 +790,7 @@
            if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
            else run("pane.split", { pane, direction: "right", mod, props: previewProps });
          } else if (rich) {
-@@ -288,7 +364,7 @@
+@@ -288,7 +374,7 @@
            run("layout.select", { stack, child: "preview-plus" });
          } else this.show(path, cx);
        } catch {
@@ -733,7 +799,7 @@
        }
        cx.notify();
      });
-@@ -310,12 +386,12 @@
+@@ -310,12 +396,12 @@
          if (text === null || text.includes("\0")) {
            changed = Boolean(this.code);
            this.code?.release(); this.code = null;
@@ -749,7 +815,7 @@
        finally { if (changed && this.previewRequest === request && this.current(context)) cx.notify(); }
      });
    }
-@@ -330,7 +406,22 @@
+@@ -330,7 +416,22 @@
      this.context = JSON.stringify([p.file, p.on]);
      this.on = p.on ?? null;
      this.show(p.file, cx);
@@ -773,7 +839,7 @@
    }
    renderPreview(cx) {
      const { colors: t, font } = appearance();
-@@ -340,7 +431,7 @@
+@@ -340,7 +441,7 @@
      return v_flex().id("file-viewer").size_full().min_w(0).min_h(0).bg(t.background).text_color(t.foreground).font_family(font).text_size(13)
        .child(div().h(42).px(14).flex().items_center().flex_none().border_b(0.5).border_color(t.border)
          .child(div().truncate().tooltip(this.file).font_semibold().child(basename(this.file))))
@@ -782,7 +848,7 @@
    }
    target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
    menu(path, kind, root, event, cx) {
-@@ -382,7 +473,7 @@
+@@ -382,7 +483,7 @@
      if (lookChanged || chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this, look });
      this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
    }
@@ -791,7 +857,7 @@
    scheduleFit(cx, cause = "background") {
      const fit = props()?.fit;
      if (!fit?.node || this.file) return;
-@@ -446,11 +537,11 @@
+@@ -446,11 +547,11 @@
        .on_mouse_move((event, cx) => dragMove(this, event, cx))
        .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
        .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
@@ -805,7 +871,7 @@
            .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
              if (!add) return;
              const root = entry?.folders[0]?.path || this.root;
-@@ -459,7 +550,7 @@
+@@ -459,7 +560,7 @@
              cx.stop_propagation();
            }).child(svg("mods/files-plus/plus.svg").size(14)))
          .when(Boolean(this.file), el => el.child(div().max_w(140).truncate().text_size(12).text_color(t.dim).tooltip(this.file).child(title)))
@@ -814,7 +880,7 @@
            .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
            .on_click((_event, cx) => {
              cx.stop_propagation();
-@@ -469,7 +560,7 @@
+@@ -469,7 +570,7 @@
        .when(!this.file, el => el.child(this.treeView))
        .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
          .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
