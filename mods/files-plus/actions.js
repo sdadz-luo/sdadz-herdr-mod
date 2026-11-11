@@ -17,9 +17,11 @@ export function menuLayout(items, statusText, metrics, viewport, pointer, zoom =
 export const CLIPBOARD = "files-plus.clipboard", REVISION = "files-plus.revision";
 const windows = on => !on && window().platform === "windows";
 const destination = target => target.kind === "file" ? dirname(target.path) : target.path;
-async function checked(command, args, on) {
+// explorer.exe 把请求转交给已运行的 shell 后自身非 0 退出，即使文件已打开，
+// 所以调用方可传 ignoreExitCode 跳过退出码检查。
+async function checked(command, args, on, ignoreExitCode = false) {
   const result = await exec(command, args, { on });
-  if (result.code !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || `${command} failed`);
+  if (!ignoreExitCode && result.code !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || `${command} failed`);
   return result;
 }
 const shell = (script, args, on) => checked("sh", ["-c", script, "files-plus", ...args], on);
@@ -155,7 +157,7 @@ export async function reveal(target) {
   if (target.on !== null) throw new Error("仅本地文件可显示所在位置");
   const platform = window().platform;
   if (platform === "macos") await checked("open", ["-R", target.path], null);
-  else if (platform === "windows") await checked("explorer.exe", [`/select,${target.path.replace(/\//g, "\\")}`], null);
+  else if (platform === "windows") await checked("explorer.exe", [`/select,${target.path.replace(/\//g, "\\")}`], null, true);
   else await checked("xdg-open", [dirname(target.path)], null);
 }
 export async function openWithSystem(target) {
@@ -164,7 +166,7 @@ export async function openWithSystem(target) {
   if (target.kind !== "file") throw new Error("仅文件可用系统应用打开");
   const platform = window().platform;
   const command = platform === "macos" ? "open" : platform === "windows" ? "explorer.exe" : "xdg-open";
-  await checked(command, [platform === "windows" ? target.path.replace(/\//g, "\\") : target.path], null);
+  await checked(command, [platform === "windows" ? target.path.replace(/\//g, "\\") : target.path], null, platform === "windows");
 }
 export async function installed(name) { return await readTextFile(joinPath(appHome(), `mods/${name}/mod.json`)) !== null; }
 export function menuItems(target) {

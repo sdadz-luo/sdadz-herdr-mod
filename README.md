@@ -29,7 +29,7 @@
 │   └── tabs-graph/
 ├── patches/            本地修改相对上游的补丁
 ├── scripts/mkpatch.py  从上游副本生成本地补丁
-└── AGENTS.md           给 AI 助手的工作区说明
+└── CLAUDE.md           给 AI 助手的工作区说明
 ```
 
 `gpui-kit.d.ts` 和 `jsconfig.json` 由 Herdr 生成，不入库。
@@ -39,7 +39,8 @@
 四个 mod 都以上游为基准，本地修改集中在：
 
 - 整体汉化：界面文字、菜单、错误提示，只改用户可见字符串。
-- Windows 中文环境：中文文件名与路径处理。
+- Windows 中文环境：中文文件名与路径处理；`explorer.exe` 转交请求后退出码
+  不可靠，files-plus 与 preview-plus 的「打开」不再据此误报失败。
 - files-plus：用 `node` 批量读取目录并预取；修复打开文件时的查重与点击
   丢失；接入 Material Icon Theme 文件图标；所有文件交给 preview-plus；
   本地目录树只在 watch 缺失时兜底刷新。

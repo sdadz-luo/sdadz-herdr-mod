@@ -131,5 +131,6 @@ export async function openFile(target) {
   const platform = window()?.platform;
   const command = platform === "macos" ? "open" : platform === "windows" ? "explorer.exe" : "xdg-open";
   const result = await exec(command, [target.file]);
-  if (result.code !== 0) throw new Error("系统应用无法打开此文件。");
+  // explorer.exe 把请求转交给已运行的 shell 后自身非 0 退出，即使文件已打开。
+  if (platform !== "windows" && result.code !== 0) throw new Error("系统应用无法打开此文件。");
 }

@@ -43,6 +43,10 @@ def main():
     for rel in sorted(our_files - up_files):
         b = io.open(os.path.join(ours, rel), encoding="utf-8").read().splitlines(True)
         chunks.append("".join(difflib.unified_diff([], b, fromfile="/dev/null", tofile="b/" + rel, n=3)))
+    # 上游有、本地删掉的文件也要产出删除块，否则补丁无法重建本地版本。
+    for rel in sorted(up_files - our_files):
+        a = io.open(os.path.join(upstream, rel), encoding="utf-8").read().splitlines(True)
+        chunks.append("".join(difflib.unified_diff(a, [], fromfile="a/" + rel, tofile="/dev/null", n=3)))
     io.open(patch, "w", encoding="utf-8", newline="\n").write("".join(chunks))
     print(f"{patch}: {len(chunks)} files changed")
     return 0
