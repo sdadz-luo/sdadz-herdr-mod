@@ -25,7 +25,7 @@ herdr-mods/
 ├── mods/<name>/         各 mod 源码，功能与本地修改见其中的 README.md
 ├── patches/             本地修改相对上游的补丁
 ├── scripts/mkpatch.py   从上游副本生成本地补丁
-└── AGENTS.md
+└── CLAUDE.md
 ```
 
 `gpui-kit.d.ts`、`jsconfig.json` 由 Herdr 生成，`.tmp/` 是临时克隆，
