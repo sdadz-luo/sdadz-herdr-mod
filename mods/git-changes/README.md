@@ -26,8 +26,9 @@ git 自身的原始输出、分支名、路径、哈希保持原样。默认提�
 
 ## 接入布局
 
-布局 `main-plus.json` 的 `panel-body` 里，`changes` 块的 `content.mod`
-指向 `git-changes`。tab 栏的 Changes 按钮按这个 id 打开。
+在布局里放一个块，把 `content.mod` 指向 `git-changes`（示例布局
+`examples/main-plus.json` 中是 `panel-body` 下的 `changes` 块）。tab 栏的
+Changes 按钮按这个 id 显示或隐藏面板。
 
 ## 上游与补丁
 
