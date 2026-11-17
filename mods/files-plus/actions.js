@@ -1,5 +1,5 @@
 import { exec, focused, panes, spaces, window, home, appHome, readTextFile, shared, setShared, run } from "herdr";
-import { basename, dirname, joinPath, contains, relativePath, workspaceOf } from "./roots.js";
+import { basename, dirname, joinPath, contains, relativePath, pathKey, workspaceOf } from "./roots.js";
 import { textWidth } from "./metrics.js";
 
 export function menuLayout(items, statusText, metrics, viewport, pointer, zoom = 1) {
@@ -25,7 +25,16 @@ async function checked(command, args, on, ignoreExitCode = false) {
   return result;
 }
 const shell = (script, args, on) => checked("sh", ["-c", script, "files-plus", ...args], on);
-const powershell = (script, args) => checked("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${script.replace(/^(param\([^)]*\))/, "$1 $ErrorActionPreference='Stop';")} }`, ...args], null);
+// PowerShell 的 -Command 会把尾部参数重新当脚本解析：含空格、引号或花括号的
+// 路径会被拆坏（"C:/My Docs/a.txt" 只拿到 "C:/My"）。参数一律转成单引号字符串
+// 嵌进脚本，命令行上不再跟参数。
+export const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
+const powershell = (script, args = []) => {
+  const names = (script.match(/^param\(([^)]*)\)/)?.[1] || "").split(",").map(name => name.trim()).filter(Boolean);
+  const bindings = names.map((name, index) => `${name} = ${psQuote(args[index] ?? "")};`).join(" ");
+  const body = `$ErrorActionPreference='Stop'; ${bindings} ${script.replace(/^param\([^)]*\)\s*/, "")}`;
+  return checked("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { ${body} }`], null);
+};
 
 export function captureTarget(space, path, kind, root, on, physicalRoot = root) {
   const f = focused();
@@ -114,6 +123,68 @@ export async function paste(target) {
   } else await checked("cp", ["-R", "-P", "-n", source.path, path], target.on);
   changed();
   return path;
+}
+
+// 外部拖入可能一次来很多文件，逐项开进程检查和改名在 Windows 上太慢，
+// 整批交给一次 PowerShell。任务 JSON 同样嵌进脚本，由 psQuote 负责转义。
+const dropCopyScript = job => [
+  "param()",
+  // 结果里可能有中文路径，和 directory() 一样显式用 UTF-8 输出。
+  "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);",
+  `$job = ConvertFrom-Json ${psQuote(JSON.stringify(job))}; $dest = $job.dir; $seps = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar);`,
+  "if (-not (Test-Path -LiteralPath $dest -PathType Container)) { throw '目标文件夹已不可用' }",
+  "$fullDest = [IO.Path]::GetFullPath($dest).TrimEnd($seps);",
+  "foreach ($src in $job.paths) {",
+  "  try {",
+  "    if (-not (Test-Path -LiteralPath $src)) { throw '源路径已不可用' }",
+  "    $isDir = Test-Path -LiteralPath $src -PathType Container; $fullSrc = [IO.Path]::GetFullPath($src).TrimEnd($seps);",
+  // Split-Path 的 -LiteralPath 与 -Parent 不属同一参数集（5.1 会报错），这里用 .NET 方法。
+  "    $parent = [IO.Path]::GetDirectoryName($fullSrc);",
+  "    if ($parent -ieq $fullDest) { throw '已在目标文件夹中' }",
+  "    $prefix = $fullSrc + [IO.Path]::DirectorySeparatorChar;",
+  "    if ($isDir -and ($fullDest + [IO.Path]::DirectorySeparatorChar).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw '不能复制到自身或其子目录' }",
+  "    $leaf = [IO.Path]::GetFileName($fullSrc); if (-not $leaf) { throw '源路径已不可用' }",
+  "    $dot = if ($isDir) { -1 } else { $leaf.LastIndexOf('.') };",
+  "    $stem = if ($dot -gt 0) { $leaf.Substring(0, $dot) } else { $leaf }; $ext = if ($dot -gt 0) { $leaf.Substring($dot) } else { '' };",
+  "    $target = Join-Path $dest $leaf;",
+  "    for ($n = 1; Test-Path -LiteralPath $target; $n++) { $target = Join-Path $dest ($stem + $(if ($n -eq 1) { ' copy' } else { \" copy $n\" }) + $ext) }",
+  "    Copy-Item -LiteralPath $src -Destination $target -Recurse -ErrorAction Stop;",
+  "    ConvertTo-Json -Compress -InputObject ([pscustomobject]@{ ok = $true; from = $src; to = $target });",
+  "  } catch { ConvertTo-Json -Compress -InputObject ([pscustomobject]@{ ok = $false; from = $src; error = [string]$_.Exception.Message }) }",
+  "}",
+].join("\n");
+const dropRecords = text => text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => JSON.parse(line));
+// 拖入只复制、不移动：on_drop 不提供修饰键，源文件必须原样保留。
+// 远程根暂不支持——拖入的是本机路径，远程写入需要另一条传输通道。
+export async function copyDropped(paths, dir, on) {
+  if (on !== null) throw new Error("暂不支持拖入远程工作区");
+  const sources = [], failed = [];
+  for (const path of Array.isArray(paths) ? paths : []) {
+    if (typeof path === "string" && path && !/[\x00-\x1f\x7f]/.test(path)) { if (!sources.includes(path)) sources.push(path); }
+    else failed.push({ from: String(path), error: "路径无效" });
+  }
+  if (!sources.length) return { copied: [], failed };
+  if (windows(on)) {
+    const result = await powershell(dropCopyScript({ dir, paths: sources }), []), records = dropRecords(result.stdout);
+    return {
+      copied: records.filter(record => record.ok).map(record => record.to),
+      failed: [...failed, ...records.filter(record => !record.ok).map(record => ({ from: record.from, error: record.error }))]
+    };
+  }
+  const copied = [];
+  for (const source of sources) {
+    try {
+      const probe = await exec("sh", ["-c", 'if [ -d "$1" ]; then echo d; elif [ -e "$1" ] || [ -L "$1" ]; then echo f; fi', "files-plus", source], { on });
+      const kind = probe.stdout.trim() === "d" ? "dir" : probe.stdout.trim() === "f" ? "file" : null;
+      if (!kind) throw new Error("源路径已不可用");
+      if (pathKey(dirname(source)) === pathKey(dir)) throw new Error("已在目标文件夹中");
+      if (kind === "dir" && (pathKey(dir) === pathKey(source) || pathKey(dir).startsWith(pathKey(source) + "/"))) throw new Error("不能复制到自身或其子目录");
+      const target = await availablePath(dir, basename(source), kind, on);
+      await checked("cp", ["-R", "-P", "-n", source, target], on);
+      copied.push(target);
+    } catch (error) { failed.push({ from: source, error: error.message || String(error) }); }
+  }
+  return { copied, failed };
 }
 
 export async function createEntry(target, kind, name) {

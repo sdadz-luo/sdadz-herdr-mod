@@ -108,6 +108,7 @@ export class RowChunk extends View {
           if (!row.missing) panel.clickedRow = row;
         })
         .on_mouse_down("right", (event, cx) => { if (row.leaving) cx.stop_propagation(); else panel.menu(row.path, row.kind, row.root, event, cx); })
+        .on_drop((event, cx) => { if (!row.leaving) panel.dropFiles(row, event.paths); cx.stop_propagation(); })
         .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.muted) : div().w(12).flex_none())
         .child(image(iconFile(row.path, folder, row.open, dark)).size(16).flex_none())
         .child(div().min_w(0).truncate().when(!row.detail, el => el.flex_1()).child(row.name))
@@ -124,6 +125,8 @@ export class TreeView extends View {
     const { chunks, panel, look } = this.data;
     return v_flex().id("files-tree").w_full().min_w(0).flex_1().min_h(0).overflow_y_scrollbar().p(6)
       .on_mouse_down("right", (event, cx) => { if (!panel.workspace && panel.root) panel.menu(panel.root, "dir", panel.root, event, cx); })
+      // 空白处没有具体行，交给当前活动根目录。
+      .on_drop((event, cx) => { panel.dropFiles(null, event.paths); cx.stop_propagation(); })
       .children(chunks);
   }
 }

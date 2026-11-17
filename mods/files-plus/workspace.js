@@ -3,7 +3,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify } from "herdr";
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, pathKey, READ } from "./roots.js";
-import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
+import { captureTarget, installed, REVISION, menuLayout, menuItems, copyDropped, changed, psQuote } from "./actions.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
@@ -68,7 +68,8 @@ export function location(previous) {
 
 export async function directory(path, on) {
   if (!on && appWindow().platform === "windows") {
-    const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", "& { param($p) $ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); @(Get-ChildItem -LiteralPath $p -Force | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }", path]);
+    // 路径不能作为 -Command 的尾部参数传入，会被 PowerShell 重新当成脚本解析。
+    const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", `& { $ErrorActionPreference='Stop'; $p = ${psQuote(path)}; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); @(Get-ChildItem -LiteralPath $p -Force | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }`]);
     if (r.code !== 0) throw new Error(r.stderr || "无法列出此文件夹");
     const result = JSON.parse(r.stdout || "[]");
     return Array.isArray(result) ? result : [result];
@@ -98,6 +99,9 @@ export class FilesPanel extends View {
     return loc;
   }
   initPanel(cx) {
+    // 拖入复制要挂在这个 AsyncContext 上：行视图会随刷新被回收，
+    // 挂在行上的任务会中途取消，可能留下复制了一半的文件。
+    this.async = cx;
     this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
     this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map(); this.prefetched = new Map();
     this.look = appearance();
@@ -448,6 +452,25 @@ export class FilesPanel extends View {
     cx.stop_propagation();
     const target = this.target(path, kind, root), geometry = menuLayout(menuItems(target), "", metrics(), viewport(), event.position, zoom());
     openOverlay({ mod: "files-plus", kind: "popup", ...geometry, props: { role: "menu", target, geometry, pointer: event.position } });
+  }
+  // 从系统拖入文件：落点决定目标目录。文件行落到父文件夹，空白处落到活动根目录。
+  dropFiles(row, paths) {
+    if (!Array.isArray(paths) || !paths.length || row?.missing) return;
+    const dir = row ? (row.kind === "file" ? dirname(row.path) : row.path) : (this.activeRoot || this.rootInfo?.[0]?.path || this.root);
+    if (!dir) return;
+    const context = this.context;
+    this.async.spawn(async cx => {
+      try {
+        const { copied, failed } = await copyDropped(paths, dir, this.on);
+        if (this.context !== context) return;
+        if (copied.length) {
+          if (!this.folders.has(dir)) this.toggle(dir, cx);
+          changed();
+          notify({ title: `已复制 ${copied.length} 项到 ${basename(dir)}`, level: "success" });
+        }
+        if (failed.length) notify({ title: `${failed.length} 项未复制`, body: failed.slice(0, 3).map(item => `${basename(item.from)}：${item.error}`).join("\n"), level: "warning" });
+      } catch (error) { notify({ title: "复制失败", body: error.message || String(error), level: "error" }); }
+    });
   }
   syncTree(cx, loc = this.location()) {
     const roots = this.rootInfo || this.workspace?.folders || [];
