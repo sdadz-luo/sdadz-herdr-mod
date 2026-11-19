@@ -42,7 +42,7 @@ const ICONS = {
 };
 
 function button(id, label, colors, action, enabled = true, selected = false, icon = ICONS[id]) {
-  const title = { "←": "Back", "−": "Zoom out", "+": "Zoom in", "100%": "Actual size" }[label] || label;
+  const title = { "←": "返回", "−": "缩小", "+": "放大", "100%": "原始大小" }[label] || label;
   return div().id(id).h(icon ? 26 : 28).when(Boolean(icon), el => el.w(26)).when(!icon, el => el.px(8))
     .flex_none().flex().items_center().justify_center().rounded(6).text_size(12)
     .role("button").accessibility_label(title).disabled(!enabled).cursor_default()
@@ -235,7 +235,7 @@ export default class PreviewPlus extends View {
             const value = read.text;
             if (value.includes("\0")) throw new Error("二进制文件没有文本预览。");
             this.truncated = value.length > TEXT_LIMIT;
-            this.text = this.truncated ? value.slice(0, TEXT_LIMIT) + "\n\n… (file truncated)" : value;
+            this.text = this.truncated ? value.slice(0, TEXT_LIMIT) + "\n\n…（文件已截断）" : value;
             if (!selected.on && !this.truncated) {
               this.document = { file: selected.file, base: value, text: value, encoding: read.encoding };
               this.documents.set(selected.file, this.document);
@@ -452,7 +452,7 @@ export default class PreviewPlus extends View {
         .when(Boolean(this.document?.encoding) && this.document.encoding !== UTF8, el => el
           .child(div().px(4).text_size(11).text_color(colors.dim).tooltip("文件编码").accessibility_label(`编码 ${this.document.encoding}`).child(this.document.encoding.toUpperCase())))
         .when(this.dirty() || Boolean(this.document?.saving), el => el.child(div().id("preview-dirty").size(6).mr(4).flex_none().rounded_full().bg(colors.muted)
-          .tooltip(this.document?.saving ? "正在保存…" : "未保存的修改").accessibility_label(this.document?.saving ? "Saving" : "未保存的修改")))
+          .tooltip(this.document?.saving ? "正在保存…" : "未保存的修改").accessibility_label(this.document?.saving ? "正在保存" : "未保存的修改")))
         .when(Boolean(this.code) && !this.document, el => el.child(div().size(16).flex_none().flex().items_center().justify_center().text_color(colors.dim)
           .tooltip(this.selected.on ? "远程文件只读" : "截断的文件只读").accessibility_label("只读")
           .child(svg("mods/preview-plus/icons/lock.svg").size(12))))

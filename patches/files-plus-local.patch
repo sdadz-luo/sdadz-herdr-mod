@@ -80,7 +80,7 @@
    return result.code === 0;
  }
  export async function availablePath(dir, name, kind, on) {
-@@ -88,30 +99,92 @@
+@@ -88,38 +99,100 @@
      const path = joinPath(dir, candidate);
      if (!await exists(path, on)) return path;
    }
@@ -179,16 +179,17 @@
  }
  
  export async function createEntry(target, kind, name) {
-@@ -119,7 +192,7 @@
+   ensureTarget(target); validateName(name);
    const path = joinPath(destination(target), name);
-   if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
+-  if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
++  if (await exists(path, target.on)) throw new Error("已存在同名条目");
    if (windows(target.on)) {
 -    await powershell('param($p,$kind) if (Test-Path -LiteralPath $p) { throw "An entry with this name already exists" }; New-Item -Path $p -ItemType $kind -ErrorAction Stop | Out-Null', [path, kind === "file" ? "File" : "Directory"]);
 +    await powershell('param($p,$kind) if (Test-Path -LiteralPath $p) { throw "已存在同名条目" }; New-Item -Path $p -ItemType $kind -ErrorAction Stop | Out-Null', [path, kind === "file" ? "File" : "Directory"]);
    } else if (kind === "file") await shell('set -C; : > "$1"', [path], target.on);
    else await checked("mkdir", [path], target.on);
    changed();
-@@ -128,7 +201,7 @@
+@@ -128,10 +201,10 @@
  
  export async function renameEntry(target, name) {
    ensureTarget(target); validateName(name);
@@ -196,7 +197,11 @@
 +  if (target.kind === "root") throw new Error("工作区根目录不能在此重命名");
    if (name === basename(target.path)) return target.path;
    const path = joinPath(dirname(target.path), name);
-   if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
+-  if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
++  if (await exists(path, target.on)) throw new Error("已存在同名条目");
+   if (windows(target.on)) await powershell('param($p,$name) Rename-Item -LiteralPath $p -NewName $name -ErrorAction Stop', [target.path, name]);
+   else await shell('mv -n "$1" "$2" && { [ ! -e "$1" ] && [ ! -L "$1" ]; }', [target.path, path], target.on);
+   changed();
 @@ -140,7 +213,7 @@
  
  export async function trashEntry(target) {
@@ -331,6 +336,15 @@
  import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
  import { renderDrag } from "./drag.js";
  import { OPEN_LOCATION, OPEN_OPTIONS, openLocation } from "./preferences.js";
+@@ -31,7 +31,7 @@
+     } else if (this.role === "dialog") {
+       if (NAME_ACTIONS.has(this.action)) {
+         const value = this.action === "rename" ? basename(this.targetEntry.path) : "";
+-        this.input = InputState.new({ value, placeholder: "Name" });
++        this.input = InputState.new({ value, placeholder: "名称" });
+         if (value) this.input.set_selected_range({ start: 0, end: value.length });
+         this.input.on("change", (_event, cx) => { this.error = null; cx.notify(); });
+         this.input.on("submit", (_event, cx) => this.submit(cx));
 @@ -67,6 +67,7 @@
          else if (item.id === "path") cx.write_to_clipboard(target.path);
          else if (item.id === "relative") cx.write_to_clipboard(relativePath(target.root, target.path));
@@ -534,7 +548,16 @@
    return { name: raw.name || basename(file).replace(/\.herdr-workspace\.json$/, ""), folders, raw };
  }
  
-@@ -77,7 +83,7 @@
+@@ -65,6 +71,8 @@
+   if (JSON.stringify(shared(key)) !== JSON.stringify(value)) setShared(key, value);
+ }
+ export function setWorkspace(id, value) { putShared(SPACES, { ...(shared(SPACES) || {}), [id]: value }); }
++// 多根工作区沿用上游的平台限制：上游在 Windows 上未启用（config.js 的
++// checkSpace 同样拒绝），Windows 恒走单根面板。
+ export function workspaceOf(id) {
+   const space = spaces().find(s => s.id === id);
+   return space?.machine === null && window()?.platform !== "windows" ? shared(SPACES)?.[id] || null : null;
+@@ -77,7 +85,7 @@
  }
  export async function loadConfig(file) {
    const text = await readTextFile(file);
@@ -586,7 +609,12 @@
      for (const entry of list) {
        const path = joinPath(prefix, entry.name), open = state.folders.has(path);
        out.push({ key: path, id: `file-${path}`, path, root, depth, kind: entry.dir ? "dir" : "file", name: entry.name,
-@@ -39,9 +63,9 @@
+@@ -35,13 +59,13 @@
+   if (state.workspace) for (const folder of state.rootInfo || state.workspace.folders) {
+     const path = folder.path, open = state.folders.has(path), missing = folder.exists === false;
+     out.push({ key: `root-${path}`, id: `root-${path}`, path, root: path, depth: 0, kind: "root", name: label(folder),
+-      detail: missing ? "Not found" : shortPath(path), open, missing, selected: path === state.activeRoot });
++      detail: missing ? "未找到" : shortPath(path), open, missing, selected: path === state.activeRoot });
      if (open && !missing) walk(path, path, 1);
    }
    else if (state.root) walk(state.root, state.root, 0);

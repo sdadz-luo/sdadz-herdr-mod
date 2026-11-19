@@ -31,7 +31,7 @@ export default class FilesPlus extends FilesPanel {
     } else if (this.role === "dialog") {
       if (NAME_ACTIONS.has(this.action)) {
         const value = this.action === "rename" ? basename(this.targetEntry.path) : "";
-        this.input = InputState.new({ value, placeholder: "Name" });
+        this.input = InputState.new({ value, placeholder: "名称" });
         if (value) this.input.set_selected_range({ start: 0, end: value.length });
         this.input.on("change", (_event, cx) => { this.error = null; cx.notify(); });
         this.input.on("submit", (_event, cx) => this.submit(cx));

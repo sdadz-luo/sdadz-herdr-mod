@@ -14,7 +14,7 @@
 | [files-plus](mods/files-plus/) | 文件树面板：多根工作区、右键菜单、拖入复制、拖拽插入 `@`、VS Code 图标 | herdr-mods | 建议搭配 preview-plus |
 | [preview-plus](mods/preview-plus/) | 文件预览与编辑：文本、Markdown、图片、PDF，支持 UTF-8/GBK | herdr-mods | 由 files-plus 传入文件 |
 | [git-changes](mods/git-changes/) | Git 面板：暂存与提交、提交历史图、主区域 diff | herdr-git-changes | 无 |
-| [tabs-graph](mods/tabs-graph/) | 标签栏：Files / Changes 面板开关，每个空间记住上次选择 | 无，克隆 Herdr 内置 tabs | 无 |
+| [tabs-graph](mods/tabs-graph/) | 标签栏：文件 / 更改面板开关，每个空间记住上次选择 | 无，克隆 Herdr 内置 tabs | 无 |
 
 各 mod 的功能、本地修改和限制见其目录下的 `README.md`。
 
@@ -120,7 +120,7 @@ Herdr 会热重载 mod；个别情况下需要重启应用。
 - preview-plus：删去与 files-plus 重复的文件树；GBK/GB18030 双向编辑；
   Markdown 默认源码；watch 事件去抖。
 - git-changes：本地轮询改为 `watchFolder` 驱动，远程保留 10 秒轮询。
-- tabs-graph：去掉已废弃的 Git 按钮，加入 Files / Changes 面板开关。
+- tabs-graph：去掉已废弃的 Git 按钮，加入文件 / 更改面板开关。
 
 本地修改通过 `patches/` 下的补丁记录，补丁只含代码差异，不含图标资产。
 维护者更新上游、生成补丁的流程见 `CLAUDE.md`。
@@ -129,6 +129,8 @@ Herdr 会热重载 mod；个别情况下需要重启应用。
 
 - 主要在 Windows 11 + Herdr 0.1.16 上验证；macOS/Linux 只保证代码层面
   可运行，未做完整回归。
+- files-plus 的多根工作区（一个面板挂多个根目录）沿用上游的平台限制，
+  Windows 上不启用：添加根目录按钮隐藏，面板始终显示单根。
 - files-plus 从系统拖入文件只支持本机目录；拖到远程工作区会提示暂不支持。
 - preview-plus 的 PDF 预览只在 macOS 可用；远程文件只能纯文本预览，
   不能保存。
@@ -166,6 +168,7 @@ files-plus 可见时每 10 秒兜底刷新；Herdr 的 `watchFolder` 在 mod 热
 
 - 本仓库原创修改：MIT，见 [LICENSE](LICENSE)。
 - Herdr 内置 mod 派生部分：Apache-2.0；git-changes 含 herdr-git-graph（MIT）
-  与 Lucide（ISC）代码；文件图标为 Material Icon Theme（MIT）。
+  与 Lucide（ISC，部分派生自 Feather、MIT）代码；文件图标为
+  Material Icon Theme（MIT）。
 - 完整的来源、许可与涉及范围见 [THIRD_PARTY.md](THIRD_PARTY.md)，许可正文
   在 `LICENSES/`。重新分发时请保留这些文件。

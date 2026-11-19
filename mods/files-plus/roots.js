@@ -71,6 +71,8 @@ export function putShared(key, value) {
   if (JSON.stringify(shared(key)) !== JSON.stringify(value)) setShared(key, value);
 }
 export function setWorkspace(id, value) { putShared(SPACES, { ...(shared(SPACES) || {}), [id]: value }); }
+// 多根工作区沿用上游的平台限制：上游在 Windows 上未启用（config.js 的
+// checkSpace 同样拒绝），Windows 恒走单根面板。
 export function workspaceOf(id) {
   const space = spaces().find(s => s.id === id);
   return space?.machine === null && window()?.platform !== "windows" ? shared(SPACES)?.[id] || null : null;

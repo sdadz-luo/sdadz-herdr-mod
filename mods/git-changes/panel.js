@@ -456,7 +456,7 @@ export class Panel {
       .on_hover((h, cx) => { if (h) this.hovered = id; else if (this.hovered === id) this.hovered = null; cx.notify(); })
       .on_click((_ev, cx) => this.pick(e, cx))
       .on_mouse_down("right", (_ev, cx) => { cx.stop_propagation(); this.fileMenu(e, cx); })
-      .child(this.checkbox(`stage-${id}`, e.staged, t, (cx) => this.act(cx, e.staged === "all" ? "Unstage" : "Stage", G.toggleArgs(e, this.hasHead))))
+      .child(this.checkbox(`stage-${id}`, e.staged, t, (cx) => this.act(cx, e.staged === "all" ? "取消暂存" : "暂存", G.toggleArgs(e, this.hasHead))))
       .child(div().w(10).flex_none().text_size(11).text_color(color).child(e.untracked ? "U" : e.status))
       .child(h_flex().flex_1().min_w(0).items_center()
         .child(div().max_w(240).min_w(0).truncate().text_color(e.status === "D" ? t.muted : t.foreground).when(e.status === "D", (el) => el.line_through()).child(name))

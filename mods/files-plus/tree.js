@@ -59,7 +59,7 @@ export function visibleRows(state) {
   if (state.workspace) for (const folder of state.rootInfo || state.workspace.folders) {
     const path = folder.path, open = state.folders.has(path), missing = folder.exists === false;
     out.push({ key: `root-${path}`, id: `root-${path}`, path, root: path, depth: 0, kind: "root", name: label(folder),
-      detail: missing ? "Not found" : shortPath(path), open, missing, selected: path === state.activeRoot });
+      detail: missing ? "未找到" : shortPath(path), open, missing, selected: path === state.activeRoot });
     if (open && !missing) walk(path, path, 1);
   }
   else if (state.root) walk(state.root, state.root, 0);

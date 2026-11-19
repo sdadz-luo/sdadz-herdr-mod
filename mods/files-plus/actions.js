@@ -190,7 +190,7 @@ export async function copyDropped(paths, dir, on) {
 export async function createEntry(target, kind, name) {
   ensureTarget(target); validateName(name);
   const path = joinPath(destination(target), name);
-  if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
+  if (await exists(path, target.on)) throw new Error("已存在同名条目");
   if (windows(target.on)) {
     await powershell('param($p,$kind) if (Test-Path -LiteralPath $p) { throw "已存在同名条目" }; New-Item -Path $p -ItemType $kind -ErrorAction Stop | Out-Null', [path, kind === "file" ? "File" : "Directory"]);
   } else if (kind === "file") await shell('set -C; : > "$1"', [path], target.on);
@@ -204,7 +204,7 @@ export async function renameEntry(target, name) {
   if (target.kind === "root") throw new Error("工作区根目录不能在此重命名");
   if (name === basename(target.path)) return target.path;
   const path = joinPath(dirname(target.path), name);
-  if (await exists(path, target.on)) throw new Error("An entry with this name already exists");
+  if (await exists(path, target.on)) throw new Error("已存在同名条目");
   if (windows(target.on)) await powershell('param($p,$name) Rename-Item -LiteralPath $p -NewName $name -ErrorAction Stop', [target.path, name]);
   else await shell('mv -n "$1" "$2" && { [ ! -e "$1" ] && [ ! -L "$1" ]; }', [target.path, path], target.on);
   changed();
